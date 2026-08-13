@@ -10,13 +10,19 @@ def position_loss(effector_xy, target_xy):
 class BaseTrainer:
 
     def __init__(self, net: LeakyRNN, env, loss_fn, device='cpu'):
-        eval_env = copy.deepcopy(self.env)
         self.net = net.to(device)
         self.env = env.to(device)
-        self.eval_env = eval_env.to(device)
         self.env.effector.to(device)
         self.env.effector.muscle.to(device)
         self.env.effector.skeleton.to(device)
+        
+        eval_env = copy.deepcopy(env)
+        # cascade device down to effector
+        self.eval_env = eval_env.to(device)
+        self.eval_env.effector.to(device)
+        self.eval_env.effector.muscle.to(device)
+        self.eval_env.effector.skeleton.to(device)
+
         self.loss_fn = loss_fn
         self.device = device
         self.weight_history = []
@@ -29,7 +35,7 @@ class BaseTrainer:
     @torch.no_grad()
     def inference(self, options=None, seed=0):
         options = {} if options is None else options
-        obs, info = self.env.reset(seed=seed, options=options)
+        obs, info = self.eval_env.reset(seed=seed, options=options)
         batch_size = obs.shape[0]
         h = self.net.init_hidden(batch_size, device=self.device)
         goal = info["goal"].detach().clone()
@@ -44,7 +50,7 @@ class BaseTrainer:
             # run inference
             u_t, h_t, z_t, y_t = self.net(x_t, h)
             # take the network's predicted action
-            obs, reward, done, truncated, info = self.env.step(action=y_t)
+            obs, reward, done, truncated, info = self.eval_env.step(action=y_t)
             H.append(h_t)
             Y.append(y_t)
             FT.append(info["states"]["fingertip"])
@@ -55,10 +61,11 @@ class BaseTrainer:
     def train(self, num_steps=500, batch_size=32, eval_every=20, seed=0):
         losses = []
         metrics = []
+        self.env.reset(seed=seed, options={"batch_size": batch_size})
         for i in range(num_steps):
             if i % eval_every == 0:
                 metrics.append((i, self.checkpoint_behavior()))
-            loss = self.train_step(batch_size, seed=seed+i)
+            loss = self.train_step(batch_size)
             losses.append(loss)
         # guarantee the fully-trained network's behavior is captured, even if
         # num_steps isn't a multiple of eval_every (i inside the loop above
@@ -78,9 +85,9 @@ class BPTTTrainer(BaseTrainer):
         super().__init__(net, env, loss_fn, **kw)
         self.opt = torch.optim.SGD(net.parameters(), lr=lr)
 
-    def train_step(self, batch_size, seed=0):
+    def train_step(self, batch_size):
         h = self.net.init_hidden(batch_size, device=self.device)
-        obs, info = self.env.reset(options={"batch_size": batch_size}, seed=seed)
+        obs, info = self.env.reset(options={"batch_size": batch_size})
         # keeping track of info from the effector/environment for loss
         xy, target = [], []
         done = False
@@ -114,7 +121,7 @@ class RFLOTrainer(BaseTrainer):
         g.manual_seed(seed)
         self.B = torch.randn(net.n_rec, net.n_out, generator=g, device=self.device) / net.n_out**0.5
 
-    def train_step(self, batch_size, seed=0):
+    def train_step(self, batch_size):
         net = self.net
         alpha = self.net.alpha
 
@@ -128,7 +135,7 @@ class RFLOTrainer(BaseTrainer):
         dW_rec = torch.zeros_like(net.W_rec)
         dW_out = torch.zeros_like(net.W_out)
 
-        obs, info = self.env.reset(options={"batch_size": batch_size}, seed=seed)
+        obs, info = self.env.reset(options={"batch_size": batch_size})
         saved, y_leaves = [], []
         xy, target = [], []
         done = False
