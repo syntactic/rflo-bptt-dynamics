@@ -3,6 +3,7 @@ by run_experiment.py. Loads saved (seed, rule) artifacts only -- no live
 trainer/env objects -- per the Phase 2.5/3 split in remaining_work_spec.md.
 """
 from collections import defaultdict
+from itertools import combinations
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -40,21 +41,57 @@ def per_direction_trials(run):
     return list(run["H"].permute(1, 0, 2))
 
 
-def summarize_within_between(similarities, labels):
+def summarize_within_between(similarities, labels, rules=None):
     """Mean pairwise DSA distance grouped by (rule, rule) pair -- the numeric
     version of "do same-rule runs cluster together" that's easy to eyeball on
     a small heatmap but hard to judge reliably as it grows (10x10 already
     strains it). Groups on the rule prefix of each label (e.g. "BPTT-3" ->
     "BPTT"), so this generalizes past exactly two rules if that ever changes.
     """
-    rules = [label.split("-")[0] for label in labels]
     n = len(labels)
     groups = defaultdict(list)
+    if rules is None:
+        rules = [label.split("-")[0] for label in labels]
+    assert n == len(rules)
+    assert len(similarities) == len(rules)
     for i in range(n):
         for j in range(i + 1, n):
             key = tuple(sorted((rules[i], rules[j])))
             groups[key].append(similarities[i, j])
     return {key: float(np.mean(vals)) for key, vals in groups.items()}
+
+def calculate_stats_foreach_grouping(similarities, labels, rule_kinds):
+    assert len(rule_kinds) == 2
+    assert len(similarities) % 2 == 0
+    num_per_group = int(len(similarities)/2)
+    group_a_assignments = combinations(range(len(similarities)), num_per_group)
+    metrics_per_assignment = {}
+    for assignment in group_a_assignments:
+        rules = []
+        for i in range(len(similarities)):
+            if i in assignment:
+                rules.append(rule_kinds[0])
+            else:
+                rules.append(rule_kinds[1])
+        summary = summarize_within_between(similarities, labels, rules=rules)
+        assert len(summary.keys()) == 3 # two within group measures and one between group measures
+        within_group = 0
+        between_group = 0
+        for (r1, r2), mean_similarity in summary.items():
+            if r1 == r2:
+                within_group += mean_similarity
+            else:
+                between_group += mean_similarity
+        within_group /= len(rule_kinds)
+        metrics_per_assignment[assignment] = between_group - within_group
+    return metrics_per_assignment
+
+def calculate_p_value_of_dsa_distance(similarities, labels, rule_kinds):
+    enumerated_metrics = calculate_stats_foreach_grouping(similarities, labels, rule_kinds)
+    true_summary = summarize_within_between(similarities, labels)
+    test_stat = np.mean([true_summary[(k1, k2)] for (k1, k2) in true_summary.keys() if k1 != k2]) - \
+                np.mean([true_summary[(k1, k2)] for (k1, k2) in true_summary.keys() if k1 == k2])
+    return (len([x for x in enumerated_metrics.values() if x >= test_stat])+1)/(len(enumerated_metrics)+1)
 
 
 def main():
@@ -69,6 +106,8 @@ def main():
 
     for pair, mean_dist in summarize_within_between(similarities, labels).items():
         print(f"{pair}: mean DSA distance = {mean_dist:.4f}")
+
+    print(f"p-value:", calculate_p_value_of_dsa_distance(similarities, labels, RULES))
 
     fig = analysis.plot_dsa_heatmap(similarities, labels,
                                      title="DSA: RFLO vs BPTT, all seeds")
