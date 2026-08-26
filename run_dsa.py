@@ -1,7 +1,5 @@
-"""Phase 3: activation-space DSA between BPTT and RFLO, across all seeds saved
-by run_experiment.py. Loads saved (seed, rule) artifacts only -- no live
-trainer/env objects -- per the Phase 2.5/3 split in remaining_work_spec.md.
-"""
+"""Activation-space DSA between BPTT and RFLO across seeds saved by run_experiment.py."""
+
 from collections import defaultdict
 from itertools import combinations
 from pathlib import Path
@@ -11,14 +9,15 @@ import numpy as np
 import torch
 
 import analysis
+import argparse
 
 RESULTS_DIR = Path("results")
 SEEDS = range(5)
 RULES = ("BPTT", "RFLO")
 
 
-def load_run(seed, rule):
-    return torch.load(RESULTS_DIR / f"seed{seed}_{rule}.pt")
+def load_run(effector, seed, rule):
+    return torch.load(RESULTS_DIR / f"{effector}_seed{seed}_{rule}.pt")
 
 
 def per_direction_trials(run):
@@ -60,10 +59,11 @@ def summarize_within_between(similarities, labels, rules=None):
             groups[key].append(similarities[i, j])
     return {key: float(np.mean(vals)) for key, vals in groups.items()}
 
+
 def calculate_stats_foreach_grouping(similarities, labels, rule_kinds):
     assert len(rule_kinds) == 2
     assert len(similarities) % 2 == 0
-    num_per_group = int(len(similarities)/2)
+    num_per_group = int(len(similarities) / 2)
     group_a_assignments = combinations(range(len(similarities)), num_per_group)
     metrics_per_assignment = {}
     for assignment in group_a_assignments:
@@ -74,7 +74,9 @@ def calculate_stats_foreach_grouping(similarities, labels, rule_kinds):
             else:
                 rules.append(rule_kinds[1])
         summary = summarize_within_between(similarities, labels, rules=rules)
-        assert len(summary.keys()) == 3 # two within group measures and one between group measures
+        assert (
+            len(summary.keys()) == 3
+        )  # two within group measures and one between group measures
         within_group = 0
         between_group = 0
         for (r1, r2), mean_similarity in summary.items():
@@ -86,19 +88,34 @@ def calculate_stats_foreach_grouping(similarities, labels, rule_kinds):
         metrics_per_assignment[assignment] = between_group - within_group
     return metrics_per_assignment
 
+
 def calculate_p_value_of_dsa_distance(similarities, labels, rule_kinds):
-    enumerated_metrics = calculate_stats_foreach_grouping(similarities, labels, rule_kinds)
+    enumerated_metrics = calculate_stats_foreach_grouping(
+        similarities, labels, rule_kinds
+    )
     true_summary = summarize_within_between(similarities, labels)
-    test_stat = np.mean([true_summary[(k1, k2)] for (k1, k2) in true_summary.keys() if k1 != k2]) - \
-                np.mean([true_summary[(k1, k2)] for (k1, k2) in true_summary.keys() if k1 == k2])
-    return (len([x for x in enumerated_metrics.values() if x >= test_stat])+1)/(len(enumerated_metrics)+1)
+    test_stat = np.mean(
+        [true_summary[(k1, k2)] for (k1, k2) in true_summary.keys() if k1 != k2]
+    ) - np.mean(
+        [true_summary[(k1, k2)] for (k1, k2) in true_summary.keys() if k1 == k2]
+    )
+    return (len([x for x in enumerated_metrics.values() if x >= test_stat]) + 1) / (
+        len(enumerated_metrics) + 1
+    )
 
 
 def main():
+    parser = argparse.ArgumentParser(
+        prog="DSA Runner",
+        description="Analyze dynamics between systems",
+    )
+    parser.add_argument("effector", choices=["ReluPointMass24", "RigidTendonArm26"])
+    args = parser.parse_args()
+
     systems, labels = [], []
     for rule in RULES:
         for seed in SEEDS:
-            run = load_run(seed, rule)
+            run = load_run(args.effector, seed, rule)
             systems.append(per_direction_trials(run))
             labels.append(f"{rule}-{seed}")
 
@@ -109,9 +126,10 @@ def main():
 
     print(f"p-value:", calculate_p_value_of_dsa_distance(similarities, labels, RULES))
 
-    fig = analysis.plot_dsa_heatmap(similarities, labels,
-                                     title="DSA: RFLO vs BPTT, all seeds")
-    fig.savefig(RESULTS_DIR / "dsa_heatmap.png")
+    fig = analysis.plot_dsa_heatmap(
+        similarities, labels, title="DSA: RFLO vs BPTT, all seeds"
+    )
+    fig.savefig(RESULTS_DIR / f"{args.effector}_dsa_heatmap.png")
     plt.show()
 
 

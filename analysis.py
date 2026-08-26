@@ -18,7 +18,8 @@ def run_dsa(latents, n_delays=10, rank=20, delay_interval=1,
 
 
 def plot_dsa_heatmap(similarities, labels, title="DSA: RFLO vs BPTT"):
-    fig, ax = plt.subplots(figsize=(5, 4))
+    num_labels = len(labels)
+    fig, ax = plt.subplots(figsize=(num_labels, num_labels-2))
     sns.heatmap(similarities, xticklabels=labels, yticklabels=labels,
                 annot=True, fmt=".3f", ax=ax)
     ax.collections[0].colorbar.ax.set_ylabel("DSA distance")
