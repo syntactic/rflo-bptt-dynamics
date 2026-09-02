@@ -29,7 +29,7 @@ def make_terminal_weighted_loss(w_term=0.5, k=10):
 
 
 class BaseTrainer:
-    def __init__(self, net: LeakyRNN, env, loss_fn, device="cpu"):
+    def __init__(self, net: LeakyRNN, env, loss_fn, device="cpu", record_weights=True):
         self.net = net.to(device)
         self.env = env.to(device)
         self.env.effector.to(device)
@@ -48,6 +48,10 @@ class BaseTrainer:
 
         self.loss_fn = loss_fn
         self.device = device
+        # Per-step weight snapshots feed the weight-space (Q4) analysis but dominate
+        # artifact size (one N x N matrix per step). Skip them for runs that only
+        # need behavior/convergence, e.g. learning-rate exploration sweeps.
+        self.record_weights = record_weights
         self.weight_history = []
 
     @torch.no_grad()
@@ -126,7 +130,8 @@ class BPTTTrainer(BaseTrainer):
         self.opt.zero_grad()
         loss.backward()
         self.opt.step()
-        self.weight_history.append(self.snapshot_weights())
+        if self.record_weights:
+            self.weight_history.append(self.snapshot_weights())
         return loss.item()
 
 
@@ -221,5 +226,6 @@ class RFLOTrainer(BaseTrainer):
             net.W_out -= self.lr * dW_out
             net.W_rec -= self.lr * dW_rec
             net.W_in -= self.lr * dW_in
-        self.weight_history.append(self.snapshot_weights())
+        if self.record_weights:
+            self.weight_history.append(self.snapshot_weights())
         return loss.item()

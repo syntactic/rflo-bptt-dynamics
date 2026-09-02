@@ -142,6 +142,13 @@ def parse_args():
         "initialization and RNG stream are identical to a 'both' run.",
     )
     parser.add_argument(
+        "--no-weight-history",
+        action="store_true",
+        help="Skip per-step weight snapshots. Shrinks artifacts drastically (no "
+        "N x N matrix saved per step); use for runs that only need behavior and "
+        "convergence, e.g. learning-rate exploration. Omit for Q4 weight-space runs.",
+    )
+    parser.add_argument(
         "--b-seed",
         type=str,
         default="0",
@@ -222,7 +229,12 @@ if __name__ == "__main__":
         rflo_b_seed = seed if args.b_seed.lower() == "match" else int(args.b_seed)
 
         bptttrainer = BPTTTrainer(
-            bptt_net, center_out, loss_fn, lr=args.lr, device=args.device
+            bptt_net,
+            center_out,
+            loss_fn,
+            lr=args.lr,
+            device=args.device,
+            record_weights=not args.no_weight_history,
         )
         rflotrainer = RFLOTrainer(
             rflo_net,
@@ -231,6 +243,7 @@ if __name__ == "__main__":
             lr=args.lr,
             seed=rflo_b_seed,
             device=args.device,
+            record_weights=not args.no_weight_history,
         )
 
         if args.rule in ("both", "bptt"):
