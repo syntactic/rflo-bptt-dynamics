@@ -3,4 +3,10 @@ __pycache__/
 .ipynb_checkpoints/
 .jupyter/
 .virtual_documents/
-results/
+.pytest_cache/
+.DS_Store
+
+# Ignore large tensor checkpoints, allow tracking figures
+results/*.pt
+*.pt
+logs/
