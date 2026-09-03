@@ -136,7 +136,7 @@ class BPTTTrainer(BaseTrainer):
 
 
 class RFLOTrainer(BaseTrainer):
-    def __init__(self, net, env, loss_fn, lr=1e-3, seed=0, **kw):
+    def __init__(self, net, env, loss_fn, lr=1e-3, seed=0, max_steps=100, **kw):
         super().__init__(net, env, loss_fn, **kw)
         # the paper's notebook uses three different variables but practically they
         # set all of them to the same learning rate so I decided to condense to 'lr'
@@ -148,7 +148,29 @@ class RFLOTrainer(BaseTrainer):
             / net.n_out**0.5
         )
 
+        # Per-timestep traces and states are written into these buffers in place.
+        # Cloning p (shape (batch, n_rec, n_rec)) into a fresh list entry every
+        # step churned heap memory; reusing one allocation avoids that GC pressure.
+        self.max_steps = max_steps
+        self._batch_size = None
+        self._alloc_buffers(32, max_steps)
+
+    def _alloc_buffers(self, batch_size, max_steps):
+        net = self.net
+        self._batch_size = batch_size
+        self.p_buf = torch.zeros(
+            max_steps, batch_size, net.n_rec, net.n_rec, device=self.device
+        )
+        self.q_buf = torch.zeros(
+            max_steps, batch_size, net.n_rec, net.n_in, device=self.device
+        )
+        self.h_buf = torch.zeros(max_steps, batch_size, net.n_rec, device=self.device)
+        self.y_buf = torch.zeros(max_steps, batch_size, net.n_out, device=self.device)
+
     def train_step(self, batch_size):
+        if batch_size != self._batch_size:
+            self._alloc_buffers(batch_size, self.max_steps)
+
         net = self.net
         alpha = self.net.alpha
 
@@ -158,14 +180,11 @@ class RFLOTrainer(BaseTrainer):
         # input trace
         q = torch.zeros(batch_size, net.n_rec, net.n_in, device=self.device)
 
-        dW_in = torch.zeros_like(net.W_in)
-        dW_rec = torch.zeros_like(net.W_rec)
-        dW_out = torch.zeros_like(net.W_out)
-
         obs, info = self.env.reset(options={"batch_size": batch_size})
-        saved, y_leaves = [], []
+        y_leaves = []
         xy, target = [], []
         done = False
+        t = 0
 
         while not done:
             x_t = obs
@@ -178,23 +197,31 @@ class RFLOTrainer(BaseTrainer):
 
                 # here we update the eligibility traces
                 # how much does hidden activation of unit j at time t-1
-                # affect the hidden state of unit i at time t
-                p = (1 - alpha) * p + alpha * torch.einsum("ni,nj->nij", fp, h_prev)
+                # affect the hidden state of unit i at time t.
+                # unsqueeze broadcasting forms the same outer product as
+                # einsum("ni,nj->nij", ...) without the string-parse dispatch.
+                p = (1 - alpha) * p + alpha * (fp.unsqueeze(2) * h_prev.unsqueeze(1))
 
                 # how much does the external input j contribute to
                 # hidden unit i's current state
-                q = (1 - alpha) * q + alpha * torch.einsum("ni,nj->nij", fp, x_t)
-            # give y to the effeector as a differentiable leaf which allows us to
+                q = (1 - alpha) * q + alpha * (fp.unsqueeze(2) * x_t.unsqueeze(1))
+
+                # in-place writes into the pre-allocated buffers, no per-step clone
+                self.p_buf[t].copy_(p)
+                self.q_buf[t].copy_(q)
+                self.h_buf[t].copy_(h_t)
+                self.y_buf[t].copy_(y_t)
+            # give y to the effector as a differentiable leaf which allows us to
             # get dL/dy_t
             y_leaf = y_t.detach().requires_grad_(True)
             y_leaves.append(y_leaf)
-            # save all the data at every timestep
-            saved.append((h_t, y_t, p.clone(), q.clone()))
             obs, reward, done, truncated, info = self.env.step(action=y_leaf)
             xy.append(info["states"]["fingertip"])
             target.append(info["goal"])
             h = h_t
+            t += 1
 
+        T = t
         xy = torch.stack(xy, dim=1)
         target = torch.stack(target, dim=1)
         loss = self.loss_fn(xy, target)
@@ -203,24 +230,26 @@ class RFLOTrainer(BaseTrainer):
             loss, y_leaves, allow_unused=True, materialize_grads=True
         )
 
-        # get RFLO weight updates from the effector error
-        for (h_t, y_t, p_t, q_t), g_t in zip(saved, g_list):
-            sigmoid_prime = y_t * (1 - y_t)
-            e_t = (
-                g_t * sigmoid_prime
-            )  # dL/dz aka the error at the pre-activation readout
-            c_t = (
-                e_t @ self.B.T
-            )  # (batch, n_rec): random feedback projection of the readout error into the recurrent layer
+        # Vectorize the RFLO accumulation over the whole episode instead of a
+        # Python loop over timesteps. Slice buffers to the T steps actually run.
+        G = torch.stack(g_list)  # (T, batch, n_out)
+        Y = self.y_buf[:T]
+        H = self.h_buf[:T]
+        P = self.p_buf[:T]
+        Q = self.q_buf[:T]
 
-            dW_out += torch.einsum(
-                "nk,ni->ki", e_t, h_t
-            )  # dL/dW_out, sum over the batch, outer product of e_t and h_t
+        E = G * (Y * (1.0 - Y))  # dL/dz, error at the pre-activation readout
+        C = E @ self.B.T  # random feedback projection of the readout error
 
-            # RFLO replaces the true gradient with feedback × eligibility trace
-            # contribution to synapse (a,b) = c_t[:,a] * p_t[:,a,b], summed over batch
-            dW_rec += torch.einsum("na,nab->ab", c_t, p_t)
-            dW_in += torch.einsum("na,nab->ab", c_t, q_t)
+        # dL/dW_out: outer product of e_t and h_t, summed over batch and time.
+        # Flattening (T, batch) into one axis turns the sum into a single matmul.
+        dW_out = E.reshape(-1, net.n_out).T @ H.reshape(-1, net.n_rec)
+
+        # RFLO replaces the true gradient with feedback x eligibility trace.
+        # C.unsqueeze(3) broadcasts the (a) feedback signal across the (b) trace
+        # axis; summing over time and batch yields the (a, b) weight updates.
+        dW_rec = (C.unsqueeze(3) * P).sum(dim=(0, 1))
+        dW_in = (C.unsqueeze(3) * Q).sum(dim=(0, 1))
 
         with torch.no_grad():
             net.W_out -= self.lr * dW_out
