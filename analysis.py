@@ -354,3 +354,86 @@ def per_direction_metrics(FT, targets, direction_idx, success_radius=0.05):
         )
 
     return metrics
+
+
+def delta_w(run):
+    wh = run["weight_history"]
+    start = np.asarray(wh[0], dtype=np.float64).ravel()
+    end = np.asarray(wh[-1], dtype=np.float64).ravel()
+    return end - start
+
+
+def _delta_ws_by_rule(runs):
+    """Group raw ΔW vectors by rule: {rule: array of shape (n_seeds, d)}."""
+    grouped = defaultdict(list)
+    for (rule, seed), run in runs.items():
+        grouped[rule].append(delta_w(run))
+    return {rule: np.array(vs) for rule, vs in grouped.items()}
+
+
+def build_gram_matrices(units_by_rule):
+    """Cosine (Gram) matrices for every unordered rule pair, keyed by sorted
+    pair (any number of rules): (rule, rule) is the within-seed Gram,
+    (rule_a, rule_b) the cross-rule one. Inputs are unit vectors, so each entry
+    is a cosine.
+    """
+    rules = sorted(units_by_rule)
+    grams = {}
+    for i, rule_a in enumerate(rules):
+        Xa = units_by_rule[rule_a]
+        for rule_b in rules[i:]:
+            Xb = units_by_rule[rule_b]
+            grams[(rule_a, rule_b)] = Xa @ Xb.T
+    return grams
+
+
+def gram_cosines(gram_matrices):
+    """Mean pairwise cosine per rule pair. Within-rule reads the strict upper
+    triangle (drops the self-cosine diagonal); between-rule averages all entries.
+    Keyed like summarize_within_between, so the permutation test consumes both.
+    """
+    cosines = {}
+    for (rule_a, rule_b), G in gram_matrices.items():
+        if rule_a == rule_b:
+            iu = np.triu_indices(len(G), k=1)
+            cosines[(rule_a, rule_b)] = (
+                float(G[iu].mean()) if iu[0].size else float("nan")
+            )
+        else:
+            cosines[(rule_a, rule_b)] = float(G.mean())
+    return cosines
+
+
+def participation_ratios(gram_matrices):
+    """Participation ratio PR = (sum lambda)^2 / sum(lambda^2) of each within-rule
+    Gram's eigenvalues: PR ~ 1 is one shared direction (corridor), PR ~ n_seeds
+    is an isotropic starburst. Drops roundoff eigenvalues; between-rule pairs have
+    no PR.
+    """
+    prs = {}
+    for (rule_a, rule_b), G in gram_matrices.items():
+        if rule_a == rule_b:
+            lam = np.linalg.eigvalsh(G)
+            lam = lam[lam > 1e-12]
+            prs[rule_a] = float(lam.sum() ** 2 / np.sum(lam**2))
+    return prs
+
+
+def delta_w_geometry(runs):
+    """Across-seed geometry of ΔW = W_final - W_init, per rule. Splits the
+    corridor question into length (‖ΔW‖ mean/std) and direction (mean pairwise
+    cosine + PR of the unit ΔW set). Raw grouped values; the asymmetry and its
+    permutation test come downstream.
+    """
+    raw = _delta_ws_by_rule(runs)
+    norms, units = {}, {}
+    for rule, X in raw.items():
+        rule_norms = np.linalg.norm(X, axis=1)
+        norms[rule] = {"mean": float(rule_norms.mean()), "std": float(rule_norms.std())}
+        units[rule] = X / rule_norms[:, None]
+    grams = build_gram_matrices(units)
+    return {
+        "norms": norms,
+        "cosine": gram_cosines(grams),
+        "pr": participation_ratios(grams),
+    }
