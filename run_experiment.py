@@ -31,6 +31,9 @@ def save_artifact(
     vision_noise,
     b_seed,
     loss_meta,
+    state_dict,
+    feedback_matrix,
+    reaching_distance,
 ):
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
@@ -68,6 +71,11 @@ def save_artifact(
             "b_seed": b_seed,
             # {"type": "trajectory"} or {"type": "terminal", "w_term":..., "k":...}
             "loss": loss_meta,
+            # Final trained weights (W_in/W_rec/W_out, ~KB) so the network can be
+            # reloaded and run for new inference
+            "state_dict": {k: _to_cpu(v) for k, v in state_dict.items()},
+            "feedback_matrix": _to_cpu(feedback_matrix),  # RFLO B; None for BPTT
+            "reaching_distance": reaching_distance,
         },
         file_path,
     )
@@ -275,6 +283,9 @@ if __name__ == "__main__":
                 args.vision_noise,
                 None,  # B is not used by BPTT
                 loss_meta,
+                bptt_net.state_dict(),
+                None,  # no feedback matrix for BPTT
+                reaching_distance,
             )
 
         if args.rule in ("both", "rflo"):
@@ -306,4 +317,7 @@ if __name__ == "__main__":
                 args.vision_noise,
                 rflo_b_seed,
                 loss_meta,
+                rflo_net.state_dict(),
+                rflotrainer.B,
+                reaching_distance,
             )
