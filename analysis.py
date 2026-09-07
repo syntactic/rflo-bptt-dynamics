@@ -1,5 +1,5 @@
 from collections import defaultdict
-from itertools import combinations
+from itertools import combinations, product
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -437,3 +437,95 @@ def delta_w_geometry(runs):
         "cosine": gram_cosines(grams),
         "pr": participation_ratios(grams),
     }
+
+
+def delta_w_cosine_matrix(runs):
+    """Pairwise cosine matrix across all runs' unit ΔW vectors with RULE-SEED labels."""
+    labels = []
+    U = []
+    for (rule, seed), run in runs.items():
+        vec = delta_w(run)
+        unit_vec = vec / np.linalg.norm(vec)
+        U.append(unit_vec)
+        labels.append(f"{rule}-{seed}")
+    U = np.array(U)
+    M = U @ U.T
+    return M, labels
+
+
+def _seed_to_pair(labels):
+    """Map "RULE-SEED" labels to {seed: {rule: row_index}}."""
+    pairs = defaultdict(dict)
+    for idx, label in enumerate(labels):
+        rule, seed = label.split("-")
+        pairs[seed][rule] = idx
+    return pairs
+
+
+def _within_mean(M, idxs):
+    pairs = list(combinations(idxs, 2))
+    total = 0
+    for p in pairs:
+        total += M[p]
+    return float(total / len(pairs))
+
+
+def _paired_stat(pattern, seeds, pairs, M, s, rule_kinds):
+    a_idxs, b_idxs = [], []
+    for seed, bit in zip(seeds, pattern):
+        pair = pairs[seed]
+        if bit == 0:
+            a_idxs.append(pair[rule_kinds[0]])
+            b_idxs.append(pair[rule_kinds[1]])
+        else:
+            a_idxs.append(pair[rule_kinds[1]])
+            b_idxs.append(pair[rule_kinds[0]])
+    return s * (_within_mean(M, a_idxs) - _within_mean(M, b_idxs))
+
+
+def paired_permutation_test(
+    pairwise, labels, metric_is_similarity=False, rule_kinds=("BPTT", "RFLO")
+):
+    """One-sided paired permutation test for within-rule dispersion asymmetry.
+
+    Permutes rule labels within each seed across all 2**n_seeds sign-flips.
+    Positive statistic indicates RFLO clusters tighter than BPTT:
+        s * (within_BPTT - within_RFLO), where s = -1 for similarity, +1 for distance.
+    """
+    s = 1
+    if metric_is_similarity:
+        s = -1
+    M = (np.asarray(pairwise) + np.asarray(pairwise).T) / 2
+    pairs = _seed_to_pair(labels)
+    seeds = sorted(pairs)
+
+    observed = _paired_stat((0,) * len(seeds), seeds, pairs, M, s, rule_kinds)
+    null = np.array(
+        [
+            _paired_stat(p, seeds, pairs, M, s, rule_kinds)
+            for p in product((0, 1), repeat=len(seeds))
+        ]
+    )
+    p_value = (np.sum(null >= observed) + 1) / (len(null) + 1)
+
+    return {
+        "observed": observed,
+        "p_value": p_value,
+        "null": null,
+        "n_permutations": len(null),
+    }
+
+
+def holm_bonferroni(pvals, alpha=0.05):
+    """Holm-Bonferroni step-down correction, returning (reject, p_adjusted)."""
+    pvals = np.asarray(pvals, dtype=float)
+    m = len(pvals)
+    order = np.argsort(pvals)
+    ranked = pvals[order]
+    # Scale by remaining tests; cummax enforces step-down monotonicity
+    adjusted_sorted = np.clip(
+        np.maximum.accumulate(ranked * (m - np.arange(m))), None, 1.0
+    )
+    p_adjusted = np.empty(m)
+    p_adjusted[order] = adjusted_sorted
+    return p_adjusted <= alpha, p_adjusted

@@ -8,6 +8,8 @@ from analysis import (
     delta_w_geometry,
     extract_per_direction_trajectories,
     gram_cosines,
+    holm_bonferroni,
+    paired_permutation_test,
     participation_ratios,
     perp_dist,
     process_activation_trajectories,
@@ -54,6 +56,85 @@ def mock_run_data():
         "batch_size": 32,
         "effector": "ReluPointMass24",
     }
+
+
+def test_paired_permutation_null_symmetric_about_zero():
+    labels = ["BPTT-0", "BPTT-1", "RFLO-0", "RFLO-1"]
+    # sample DSA matrix, BPTT seeds are 0.5 from each other,
+    # RFLO are 0.1 from each other
+    M = np.array(
+        [
+            [0.0, 0.5, 0.3, 0.4],
+            [0.5, 0.0, 0.6, 0.2],
+            [0.3, 0.6, 0.0, 0.1],
+            [0.4, 0.2, 0.1, 0.0],
+        ]
+    )
+    res = paired_permutation_test(M, labels)
+
+    null = res["null"]
+    assert np.allclose(np.sort(null), np.sort(-null))
+    assert abs(res["observed"]) == 0.4
+
+
+def _distance_matrix(points):
+    diff = points[:, None, :] - points[None, :, :]
+    return np.linalg.norm(diff, axis=-1)
+
+
+def _paired_labels(n_seeds):
+    return [f"BPTT-{i}" for i in range(n_seeds)] + [f"RFLO-{i}" for i in range(n_seeds)]
+
+
+def test_paired_permutation_detects_planted_asymmetry():
+    # n=6 gives an enumeration floor 2 / (2**6 + 1) = 0.031 < 0.05
+    rng = np.random.default_rng(0)
+    n_seeds = 6
+    bptt = rng.normal(0.0, 1.0, size=(n_seeds, 2))
+    rflo = rng.normal(0.0, 0.01, size=(n_seeds, 2))
+    points = np.vstack([bptt, rflo])
+    res = paired_permutation_test(_distance_matrix(points), _paired_labels(n_seeds))
+    assert res["observed"] > 0
+    assert res["p_value"] < 0.05
+    assert np.isclose(res["p_value"], 2 / (2**n_seeds + 1))
+
+
+def test_paired_permutation_null_case_not_significant():
+    # Systems drawn from a single cloud should not show dispersion asymmetry
+    rng = np.random.default_rng(1)
+    n_seeds = 6
+    points = rng.normal(0.0, 1.0, size=(2 * n_seeds, 2))
+    res = paired_permutation_test(_distance_matrix(points), _paired_labels(n_seeds))
+    assert res["p_value"] > 0.05
+
+
+def test_paired_permutation_similarity_flag_orientation():
+    # metric_is_similarity flips sign so higher cosine still yields positive statistic
+    rng = np.random.default_rng(2)
+    n_seeds = 6
+    bptt = rng.normal(0.0, 1.0, size=(n_seeds, 3))
+    rflo = np.array([1.0, 0.0, 0.0]) + rng.normal(0.0, 0.01, size=(n_seeds, 3))
+    U = np.vstack([bptt, rflo])
+    U = U / np.linalg.norm(U, axis=1, keepdims=True)
+    res = paired_permutation_test(
+        U @ U.T, _paired_labels(n_seeds), metric_is_similarity=True
+    )
+    assert res["observed"] > 0
+    assert res["p_value"] < 0.05
+
+
+def test_holm_bonferroni_known_answer():
+    # For p = [0.01, 0.04, 0.03] with m=3, adjusted p-values are [0.03, 0.06, 0.06]
+    reject, p_adj = holm_bonferroni([0.01, 0.04, 0.03], alpha=0.05)
+    assert np.allclose(p_adj, [0.03, 0.06, 0.06])
+    assert list(reject) == [True, False, False]
+
+
+def test_holm_bonferroni_step_down_blocks_later():
+    # Once a smaller p-value fails, subsequent tests cannot reject
+    reject, p_adj = holm_bonferroni([0.03, 0.04], alpha=0.05)
+    assert np.allclose(p_adj, [0.06, 0.06])
+    assert not reject.any()
 
 
 def test_extract_per_direction_trajectories(mock_run_data):
