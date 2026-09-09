@@ -8,15 +8,20 @@ from analysis import (
     delta_w_geometry,
     extract_per_direction_trajectories,
     gram_cosines,
+    grassmann_distance,
     holm_bonferroni,
+    learning_subspace,
     paired_permutation_test,
     participation_ratios,
     perp_dist,
+    principal_angles,
     process_activation_trajectories,
     process_weight_trajectories,
+    random_subspace_distance,
     reach_distance,
     reach_metrics,
     reach_relative_terminal_error,
+    subspace_distance_matrix,
     summarize_within_between,
     terminal_error,
 )
@@ -328,3 +333,120 @@ def test_delta_w_geometry_direction_ignores_length():
     assert np.isclose(base["cosine"][("R", "R")], scaled["cosine"][("R", "R")])
     assert np.isclose(base["pr"]["R"], scaled["pr"]["R"])
     assert np.isclose(scaled["norms"]["R"]["mean"], 3.0 * base["norms"]["R"]["mean"])
+
+
+# --- Learning-subspace (Grassmann) geometry --------------------------------
+
+
+def _run_in_subspace(basis, T, rng):
+    """A run whose centered weight trajectory lies exactly in span(basis).
+
+    basis is (m, d) with orthonormal rows; the snapshots are random coefficient
+    combinations of those rows, so learning_subspace(k=m) must recover the span
+    regardless of the (random) coefficients.
+    """
+    coeffs = rng.standard_normal((T, basis.shape[0]))
+    W = coeffs @ basis  # (T, d), every row in span(basis)
+    return {"weight_history": [W[t].copy() for t in range(T)]}
+
+
+def test_principal_angles_identical_and_orthogonal():
+    Q = np.eye(4)[:, :2]  # span(e0, e1)
+    assert np.allclose(principal_angles(Q, Q), 0.0, atol=1e-7)
+    Q_orth = np.eye(4)[:, 2:]  # span(e2, e3)
+    assert np.allclose(principal_angles(Q, Q_orth), np.pi / 2, atol=1e-7)
+
+
+def test_principal_angles_known_angle_line():
+    # Two lines (k=1) at a known angle: cos of the single angle is their dot product.
+    theta0 = 0.6
+    Qa = np.array([[1.0], [0.0]])
+    Qb = np.array([[np.cos(theta0)], [np.sin(theta0)]])
+    assert np.allclose(principal_angles(Qa, Qb), [theta0], atol=1e-9)
+
+
+def test_principal_angles_sorted_smallest_first():
+    # Planes sharing e0 (angle 0) and disagreeing by phi on the second direction.
+    phi = 0.7
+    Qa = np.eye(3)[:, :2]  # span(e0, e1)
+    Qb = np.array([[1.0, 0.0], [0.0, np.cos(phi)], [0.0, np.sin(phi)]])
+    assert np.allclose(principal_angles(Qa, Qb), [0.0, phi], atol=1e-9)
+
+
+def test_grassmann_distance_known_values():
+    theta = np.array([0.0, np.pi / 2])
+    assert np.isclose(grassmann_distance(theta, "geodesic"), np.pi / 2)
+    assert np.isclose(grassmann_distance(theta, "chordal"), 1.0)  # ||sin([0, pi/2])||
+    assert grassmann_distance(np.zeros(3), "geodesic") == 0.0
+    assert grassmann_distance(np.zeros(3), "chordal") == 0.0
+
+
+def test_grassmann_chordal_equals_projector_frobenius():
+    # Chordal distance must equal ||P_a - P_b||_F / sqrt(2); catches a double-square.
+    rng = np.random.default_rng(0)
+    d, k = 10, 3
+    Qa = np.linalg.qr(rng.standard_normal((d, k)))[0]
+    Qb = np.linalg.qr(rng.standard_normal((d, k)))[0]
+    theta = principal_angles(Qa, Qb)
+    Pa, Pb = Qa @ Qa.T, Qb @ Qb.T
+    assert np.isclose(
+        grassmann_distance(theta, "chordal"),
+        np.linalg.norm(Pa - Pb, "fro") / np.sqrt(2),
+    )
+
+
+def test_grassmann_distance_rejects_unknown_metric():
+    with pytest.raises(ValueError):
+        grassmann_distance(np.array([0.1, 0.2]), "bogus")
+
+
+def test_learning_subspace_recovers_planted_span():
+    rng = np.random.default_rng(0)
+    d, m = 12, 2
+    basis = np.linalg.qr(rng.standard_normal((d, m)))[0].T  # (m, d), orthonormal rows
+    run = _run_in_subspace(basis, T=40, rng=rng)
+    Q = learning_subspace(run, k=m, bin_size=4)
+    assert Q.shape == (d, m)
+    assert np.allclose(Q.T @ Q, np.eye(m), atol=1e-7)  # orthonormal columns
+    # Zero principal angles against the planted basis == same subspace recovered.
+    assert np.allclose(principal_angles(Q, basis.T), 0.0, atol=1e-6)
+
+
+def test_subspace_distance_matrix_tight_vs_diffuse():
+    # tight seeds share one subspace (within-distance 0); diffuse seeds each occupy a
+    # disjoint basis block, so every diffuse pair is orthogonal.
+    rng = np.random.default_rng(0)
+    d, m, n_seeds, T = 12, 2, 3, 40
+    runs = {}
+    for s in range(n_seeds):
+        runs[("tight", s)] = _run_in_subspace(np.eye(d)[:m], T, rng)
+        block = np.eye(d)[4 + m * s : 4 + m * s + m]
+        runs[("diffuse", s)] = _run_in_subspace(block, T, rng)
+
+    M, labels = subspace_distance_matrix(runs, k=m, metric="geodesic", bin_size=4)
+
+    assert np.allclose(M, M.T)  # symmetric
+    assert np.allclose(np.diag(M), 0.0)  # a subspace is distance 0 from itself
+    assert all(lbl.split("-")[0] in {"tight", "diffuse"} for lbl in labels)
+
+    summ = summarize_within_between(M, labels)
+    orthogonal = np.sqrt(m) * np.pi / 2  # geodesic distance of m orthogonal angles
+    assert summ[("tight", "tight")] < 1e-6  # canalization: within-group ~ 0
+    assert np.isclose(summ[("diffuse", "diffuse")], orthogonal, atol=1e-6)
+    assert summ[("tight", "tight")] < summ[("diffuse", "diffuse")]
+
+
+def test_random_subspace_distance_near_orthogonal_in_high_d():
+    # d >> k: random subspaces are near-orthogonal, so every principal angle ~ pi/2
+    # and the geodesic distance sits near its ceiling sqrt(k)*pi/2 (the "no corridor" null).
+    d, k = 500, 3
+    mean, std = random_subspace_distance(d, k, metric="geodesic", n_pairs=100, seed=0)
+    ceiling = np.sqrt(k) * np.pi / 2
+    assert 0.9 * ceiling < mean <= ceiling
+    assert std >= 0.0
+
+
+def test_random_subspace_distance_reproducible():
+    a = random_subspace_distance(50, 2, seed=7)
+    b = random_subspace_distance(50, 2, seed=7)
+    assert a == b
