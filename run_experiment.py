@@ -160,7 +160,9 @@ def parse_args():
         "--b-seed",
         type=str,
         default="0",
-        help="Seed for RFLO random feedback matrix B: integer (e.g. '0' for fixed across runs) or 'match' to match the network seed (default: '0')",
+        help="Seed for RFLO random feedback matrix B: integer (e.g. '0' for fixed across runs)"
+        "or 'match' to match the network seed "
+        "or 'aligned' to use real feedback (default: '0')",
     )
     parser.add_argument(
         "--proprioception-noise",
@@ -234,7 +236,13 @@ if __name__ == "__main__":
         rflo_net = copy.deepcopy(bptt_net)
 
         # Resolve RFLO feedback matrix B seed
-        rflo_b_seed = seed if args.b_seed.lower() == "match" else int(args.b_seed)
+        rflo_b_seed = (
+            seed
+            if args.b_seed.lower() == "match"
+            else None
+            if args.b_seed.lower() == "aligned"
+            else int(args.b_seed)
+        )
 
         bptttrainer = BPTTTrainer(
             bptt_net,
@@ -249,7 +257,7 @@ if __name__ == "__main__":
             center_out,
             loss_fn,
             lr=args.lr,
-            seed=rflo_b_seed,
+            b_seed=rflo_b_seed,
             device=args.device,
             record_weights=not args.no_weight_history,
         )
@@ -315,9 +323,9 @@ if __name__ == "__main__":
                 "RFLO",
                 args.proprioception_noise,
                 args.vision_noise,
-                rflo_b_seed,
+                "aligned" if rflo_b_seed is None else rflo_b_seed,
                 loss_meta,
                 rflo_net.state_dict(),
-                rflotrainer.B,
+                rflotrainer.B,  # this would be None if we're aligned
                 reaching_distance,
             )

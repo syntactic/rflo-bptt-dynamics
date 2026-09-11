@@ -136,17 +136,20 @@ class BPTTTrainer(BaseTrainer):
 
 
 class RFLOTrainer(BaseTrainer):
-    def __init__(self, net, env, loss_fn, lr=1e-3, seed=0, max_steps=100, **kw):
+    def __init__(self, net, env, loss_fn, lr=1e-3, b_seed=0, max_steps=100, **kw):
         super().__init__(net, env, loss_fn, **kw)
         # the paper's notebook uses three different variables but practically they
         # set all of them to the same learning rate so I decided to condense to 'lr'
         self.lr = lr
-        g = torch.Generator(device=self.device)
-        g.manual_seed(seed)
-        self.B = (
-            torch.randn(net.n_rec, net.n_out, generator=g, device=self.device)
-            / net.n_out**0.5
-        )
+        self.b_seed = b_seed
+        self.B = None
+        if self.b_seed is not None:
+            g = torch.Generator(device=self.device)
+            g.manual_seed(self.b_seed)
+            self.B = (
+                torch.randn(net.n_rec, net.n_out, generator=g, device=self.device)
+                / net.n_out**0.5
+            )
 
         # Per-timestep traces and states are written into these buffers in place.
         # Cloning p (shape (batch, n_rec, n_rec)) into a fresh list entry every
@@ -239,7 +242,10 @@ class RFLOTrainer(BaseTrainer):
         Q = self.q_buf[:T]
 
         E = G * (Y * (1.0 - Y))  # dL/dz, error at the pre-activation readout
-        C = E @ self.B.T  # random feedback projection of the readout error
+        if self.B is None:
+            C = E @ net.W_out.detach()  # detach from autograd
+        else:
+            C = E @ self.B.T  # random feedback projection of the readout error
 
         # dL/dW_out: outer product of e_t and h_t, summed over batch and time.
         # Flattening (T, batch) into one axis turns the sum into a single matmul.
