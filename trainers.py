@@ -136,12 +136,24 @@ class BPTTTrainer(BaseTrainer):
 
 
 class RFLOTrainer(BaseTrainer):
-    def __init__(self, net, env, loss_fn, lr=1e-3, b_seed=0, max_steps=100, **kw):
+    def __init__(
+        self,
+        net,
+        env,
+        loss_fn,
+        lr=1e-3,
+        b_seed=0,
+        b_norm_match=False,
+        max_steps=100,
+        **kw,
+    ):
         super().__init__(net, env, loss_fn, **kw)
         # the paper's notebook uses three different variables but practically they
         # set all of them to the same learning rate so I decided to condense to 'lr'
         self.lr = lr
         self.b_seed = b_seed
+        # Rescales aligned feedback (b_seed=None) to random B's expected norm
+        self.b_norm_match = b_norm_match
         self.B = None
         if self.b_seed is not None:
             g = torch.Generator(device=self.device)
@@ -243,9 +255,17 @@ class RFLOTrainer(BaseTrainer):
 
         E = G * (Y * (1.0 - Y))  # dL/dz, error at the pre-activation readout
         if self.B is None:
-            C = E @ net.W_out.detach()  # detach from autograd
+            # Aligned feedback: project error through the live readout transpose
+            W_fb = net.W_out.detach()
+            if self.b_norm_match:
+                # Random B entries have variance 1/n_out, giving expected Frobenius norm
+                # sqrt(n_rec). At init, W_out is ~50x smaller, suppressing effective
+                # learning rate on W_rec/W_in. Rescaling W_out to sqrt(n_rec) matches
+                # random B's feedback gain, isolating credit direction from gain.
+                W_fb = W_fb * (net.n_rec**0.5 / W_fb.norm())
+            C = E @ W_fb
         else:
-            C = E @ self.B.T  # random feedback projection of the readout error
+            C = E @ self.B.T  # Static random feedback projection
 
         # dL/dW_out: outer product of e_t and h_t, summed over batch and time.
         # Flattening (T, batch) into one axis turns the sum into a single matmul.

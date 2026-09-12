@@ -160,9 +160,12 @@ def parse_args():
         "--b-seed",
         type=str,
         default="0",
-        help="Seed for RFLO random feedback matrix B: integer (e.g. '0' for fixed across runs)"
-        "or 'match' to match the network seed "
-        "or 'aligned' to use real feedback (default: '0')",
+        help=(
+            "Feedback matrix B configuration: integer seed (e.g. '0' for fixed B across runs), "
+            "'match' (match network seed), 'aligned' (live W_out transpose), "
+            "or 'aligned-matched' (live W_out rescaled to random B's expected norm). "
+            "Default: '0'."
+        ),
     )
     parser.add_argument(
         "--proprioception-noise",
@@ -235,12 +238,15 @@ if __name__ == "__main__":
         )
         rflo_net = copy.deepcopy(bptt_net)
 
-        # Resolve RFLO feedback matrix B seed
+        # Aligned modes use live W_out transpose rather than static random B (B=None).
+        # 'aligned-matched' rescales W_out to random B's expected norm to isolate direction from gain.
+        b_arg = args.b_seed.lower()
+        b_norm_match = b_arg == "aligned-matched"
         rflo_b_seed = (
             seed
-            if args.b_seed.lower() == "match"
+            if b_arg == "match"
             else None
-            if args.b_seed.lower() == "aligned"
+            if b_arg in ("aligned", "aligned-matched")
             else int(args.b_seed)
         )
 
@@ -258,6 +264,7 @@ if __name__ == "__main__":
             loss_fn,
             lr=args.lr,
             b_seed=rflo_b_seed,
+            b_norm_match=b_norm_match,
             device=args.device,
             record_weights=not args.no_weight_history,
         )
@@ -297,7 +304,10 @@ if __name__ == "__main__":
             )
 
         if args.rule in ("both", "rflo"):
-            print(f"Training RFLO (seed={seed}, b_seed={rflo_b_seed})...")
+            print(
+                f"Training RFLO (seed={seed}, "
+                f"b_seed={b_arg if rflo_b_seed is None else rflo_b_seed})..."
+            )
             losses, metrics = rflotrainer.train(
                 num_steps=args.num_steps, batch_size=args.batch_size, seed=seed
             )
@@ -323,7 +333,8 @@ if __name__ == "__main__":
                 "RFLO",
                 args.proprioception_noise,
                 args.vision_noise,
-                "aligned" if rflo_b_seed is None else rflo_b_seed,
+                # Distinguish 'aligned' from 'aligned-matched' in metadata (both have B=None)
+                b_arg if rflo_b_seed is None else rflo_b_seed,
                 loss_meta,
                 rflo_net.state_dict(),
                 rflotrainer.B,  # this would be None if we're aligned
