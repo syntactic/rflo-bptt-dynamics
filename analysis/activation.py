@@ -2,7 +2,7 @@
 
 Hidden-state trajectories H are PCA-reduced for visualization and compared with
 DSA. DSA is legitimate here because activation trajectories are (closed-loop)
-dynamical trajectories; it is NOT used on weights (see analysis.weights).
+dynamical trajectories; it is not used on weights (see analysis.weights).
 """
 
 import matplotlib.pyplot as plt

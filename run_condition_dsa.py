@@ -72,7 +72,7 @@ def main():
         print(f"Dropped seed{s} (not converged/missing in both): {oks}")
     if len(kept) < 2:
         print(
-            f"Only {len(kept)} seeds converged in both conditions -- need >=2. Stopping."
+            f"Only {len(kept)} seeds converged in both conditions, need >=2. Stopping."
         )
         return
     print(f"Seeds in both conditions, converged (n={len(kept)}): {kept}")
@@ -82,7 +82,7 @@ def main():
         for s in kept:
             run, _ = load_H(d, args.effector, s)
             systems.append(analysis.extract_per_direction_trajectories(run))
-            # Prefix serves as the grouping key for summarize_within_between
+            # The condition prefix is the grouping key summarize_within_between reads
             labels.append(f"{cond}-{s}")
             del run
             gc.collect()
@@ -107,9 +107,7 @@ def main():
     labels_out.write_text(json.dumps(labels))
     print(f"Saved DSA matrix to: {out}")
     print(f"Saved row-order labels to: {labels_out}")
-    print(
-        "Next: run run_paired_permutation.py on this matrix for paired inference."
-    )
+    print("Next: run run_paired_permutation.py on this matrix for paired inference.")
 
 
 if __name__ == "__main__":

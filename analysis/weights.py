@@ -3,8 +3,8 @@
 Hidden units have no canonical labeling, so raw cross-seed weight geometry mixes
 real differences with relabeling artifacts. The ΔW-corridor metrics here are
 meant for the shared-init paired frame (or after permutation alignment). DSA is
-NOT applied to weights: learning trajectories are non-autonomous optimizer
-transients, not autonomous flows -- direct geometry is the right tool.
+not applied to weights: learning trajectories are non-autonomous optimizer
+transients, not autonomous flows, so direct geometry is the right tool.
 """
 
 from collections import defaultdict
@@ -137,12 +137,15 @@ def delta_w_cosine_matrix(runs):
     return M, labels
 
 
-def learning_subspace(run, k, bin_size=10):
+def learning_subspace(run, k, bin_size=10, return_spectrum=False):
     """Orthonormal basis (d, k) for the subspace one seed's weight trajectory explored.
 
     Centers on W(0), coarse-grains, keeps the top-k right singular vectors. Per-seed, not
     the shared frame of process_weight_trajectories: principal angles need each seed's own
     subspace. Caps k at the trajectory's rank.
+
+    return_spectrum also returns the cumulative variance curve, so a caller can report how
+    much of the trajectory the k it chose covers without redoing the SVD.
     """
     raw_history = run["weight_history"]
     if torch.is_tensor(raw_history[0]):
@@ -151,8 +154,10 @@ def learning_subspace(run, k, bin_size=10):
         W_traj = np.asarray(raw_history)
     centered = W_traj - W_traj[0:1, :]
     smoothed_trajectory = coarse_grain(centered, bin_size=bin_size)
-    _, _, Vt = np.linalg.svd(smoothed_trajectory, full_matrices=False)
+    _, s, Vt = np.linalg.svd(smoothed_trajectory, full_matrices=False)
     k = min(k, Vt.shape[0])
+    if return_spectrum:
+        return Vt[:k, :].T, np.cumsum(s**2) / np.sum(s**2)
     return Vt[:k, :].T
 
 
@@ -160,7 +165,7 @@ def principal_angles(Q_a, Q_b):
     """Principal angles (radians, smallest first) between two subspaces.
 
     Singular values of Q_a.T @ Q_b are their cosines; clip guards arccos at 1+eps. Angles
-    lie in [0, pi/2] since subspaces are undirected -- ~0 shared, ~pi/2 orthogonal.
+    lie in [0, pi/2] since subspaces are undirected: ~0 shared, ~pi/2 orthogonal.
     """
     _, sigma, _ = np.linalg.svd(Q_a.T @ Q_b)
     theta = np.arccos(np.clip(sigma, 0, 1))
@@ -171,7 +176,7 @@ def grassmann_distance(theta, metric="geodesic"):
     """One scalar distance on the Grassmannian from a principal-angle spectrum.
 
     geodesic = ||theta|| (arc length); chordal = ||sin theta|| (= ||P_a - P_b||_F / sqrt(2)).
-    Both are proper metrics -- unlike the mean angle -- so they behave in the permutation test.
+    Both are proper metrics, unlike the mean angle, so they behave in the permutation test.
     """
     if metric == "geodesic":
         return np.linalg.norm(theta)
@@ -186,7 +191,7 @@ def subspace_distance_matrix(runs, k, metric="geodesic", bin_size=10):
 
     Feeds summarize_within_between like delta_w_cosine_matrix, but as a distance, so
     canalization shows as small within-group values (the cosine version had them large).
-    Gauge caveat: cross-seed subspaces sit in different init gauges -- clean only in a
+    Gauge caveat: cross-seed subspaces sit in different init gauges, clean only in a
     shared gauge or after permutation alignment.
     """
     keys = list(runs.keys())
@@ -203,7 +208,7 @@ def subspace_distance_matrix(runs, k, metric="geodesic", bin_size=10):
 
 
 def random_subspace_distance(d, k, metric="geodesic", n_pairs=200, seed=0):
-    """Mean/std Grassmann distance between random k-subspaces of R^d -- the null.
+    """Mean/std Grassmann distance between random k-subspaces of R^d: the null.
 
     Independent subspaces are near-orthogonal in high d, so this is the "no corridor"
     baseline: a within-group distance only reads as canalized if it sits well below it.

@@ -11,7 +11,7 @@ def plot_workspace_and_targets(
     grid_resolution: int = 50,
 ) -> None:
     """Plots an effector's reachable cartesian workspace as a point cloud, overlaid with a starting
-    position and a set of target positions — a sanity check that targets fall inside the reachable region.
+    position and a set of target positions. A sanity check that targets fall inside the reachable region.
 
     Args:
       axis: A `matplotlib` axis handle.
@@ -77,8 +77,8 @@ def plot_training_curves(runs):
           `direction_idx -> (success_rate, mean_deviation)`.
 
     Returns:
-        The `matplotlib.figure.Figure`, with three panels -- training loss,
-        mean success rate, and mean path deviation, each over training step --
+        The `matplotlib.figure.Figure`, with three panels (training loss,
+        mean success rate, and mean path deviation, each over training step),
         one line per label in `runs`. Success rate/deviation are averaged
         across directions per checkpoint; per-direction detail is not shown here.
     """

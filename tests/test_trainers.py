@@ -1,14 +1,14 @@
+import motornet as mn
 import numpy as np
 import pytest
 import torch
-import motornet as mn
 from motornet.environment import CenterOutReach
 
 from rnn import LeakyRNN
 from trainers import BPTTTrainer, RFLOTrainer, position_loss
 
-
 # --- fixtures --------------------------------------------------------------
+
 
 @pytest.fixture
 def make_env():
@@ -17,26 +17,33 @@ def make_env():
     test_seeded_envs_produce_matching_direction_sequences needs two separate
     envs to compare against each other.
     """
+
     def _make():
-        return CenterOutReach(effector=mn.effector.ReluPointMass24(), reaching_distance=0.5)
+        return CenterOutReach(
+            effector=mn.effector.ReluPointMass24(), reaching_distance=0.5
+        )
+
     return _make
 
 
 @pytest.fixture(params=[BPTTTrainer, RFLOTrainer])
 def trainer(request, make_env):
-    """Builds one trainer, parametrized over both trainer classes -- the
-    properties under test here (eval_env separation, train() running
+    """Builds one trainer, parametrized over both trainer classes.
+
+    The properties under test here (eval_env separation, train() running
     end-to-end) belong to BaseTrainer, so they should hold for both
     subclasses without writing the checks twice.
     """
     trainer_cls = request.param
     center_out = make_env()
-    rnn = LeakyRNN(n_in=center_out.observation_space.shape[0],
-                   n_rec=64, n_out=center_out.n_muscles)
+    rnn = LeakyRNN(
+        n_in=center_out.observation_space.shape[0], n_rec=64, n_out=center_out.n_muscles
+    )
     return trainer_cls(rnn, center_out, position_loss)
 
 
 # --- tests -------------------------------------------------------------------
+
 
 def test_eval_env_is_distinct_from_training_env(trainer):
     assert trainer.eval_env is not trainer.env

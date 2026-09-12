@@ -4,7 +4,7 @@ views (activation DSA distances and weight ΔW cosines), then correct the family
 of p-values for multiple comparisons with Holm-Bonferroni.
 
 A contrast is a *cell*: an effector, a saved distance/similarity matrix, and two
-groups. Each group is `label=directory[=suffix]` -- the label it goes by in the
+groups. Each group is `label=directory[=suffix]`: the label it goes by in the
 matrix, the directory its `.pt` artifacts live in, and the filename rule suffix
 (defaulting to the label). This one shape covers both contrasts the project runs:
 
@@ -13,7 +13,7 @@ matrix, the directory its `.pt` artifacts live in, and the filename rule suffix
   feedback condition (E-varyB)   two directories, one suffix (RFLO):
     varyB=results/evaryB_varyB=RFLO  fixB=results/evaryB_fixB=RFLO
 
-Group order is (baseline, hypothesized-tighter): a POSITIVE observed statistic
+Group order is (baseline, hypothesized-tighter): a positive observed statistic
 means the *second* group clusters tighter than the first. For E-varyB the
 canalization prediction (shared B tightens the cluster) is fixB tighter, so pass
 `varyB=... fixB=...`.
@@ -127,7 +127,7 @@ def _drop_excluded(labels, exclude):
 
 
 def _check_pairing(labels, group_labels):
-    """Every label prefix is one of the two groups, and every seed carries BOTH --
+    """Every label prefix is one of the two groups, and every seed carries both,
     otherwise _paired_stat's unconditional pair[group] lookups fail cryptically."""
     prefixes = {lab.split("-")[0] for lab in labels}
     if prefixes != set(group_labels):
@@ -189,7 +189,9 @@ def delta_w_result(cell, seeds, exclude):
             wh = run.get("weight_history")
             if wh is None or len(wh) < 2:
                 n = 0 if wh is None else len(wh)
-                print(f"  [skip dW] {path} has weight_history len {n} < 2 (needs a weight-history run)")
+                print(
+                    f"  [skip dW] {path} has weight_history len {n} < 2 (needs a weight-history run)"
+                )
                 del run
                 gc.collect()
                 return None
@@ -300,13 +302,17 @@ def main():
     table = format_table(records, args.alpha)
     print("\n" + table)
     if skipped:
-        print("\nSkipped views (not in the Holm family): "
-              + ", ".join(f"{c}/{v}" for c, v in skipped))
+        print(
+            "\nSkipped views (not in the Holm family): "
+            + ", ".join(f"{c}/{v}" for c, v in skipped)
+        )
 
     with open(args.out, "a") as fh:
         fh.write(f"\n{'=' * 90}\n")
         fh.write("Paired permutation test (within-group dispersion asymmetry)\n")
-        fh.write("positive observed => second group (GROUP_B) clusters tighter than first (GROUP_A)\n")
+        fh.write(
+            "positive observed => second group (GROUP_B) clusters tighter than first (GROUP_A)\n"
+        )
         fh.write(
             f"date {date.today():%Y-%m-%d}  alpha {args.alpha}  "
             f"Holm-Bonferroni over m={m} tests"
@@ -315,7 +321,9 @@ def main():
             fh.write(f"  (excluded seeds: {sorted(exclude)})")
         fh.write("\n")
         if skipped:
-            fh.write("skipped views: " + ", ".join(f"{c}/{v}" for c, v in skipped) + "\n")
+            fh.write(
+                "skipped views: " + ", ".join(f"{c}/{v}" for c, v in skipped) + "\n"
+            )
         fh.write("=" * 90 + "\n")
         fh.write(table + "\n")
     print(f"\nAppended to {args.out}  (Holm family size m={m})")

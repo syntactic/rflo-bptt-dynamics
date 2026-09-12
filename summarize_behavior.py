@@ -3,16 +3,16 @@
 This is the "behavior-matching gate" readout: before any
 Q4 canalization analysis, we need to know whether the two rules reach matched behavior.
 
-The PRIMARY metric is the continuous, reach-relative terminal error
+The primary metric is the continuous, reach-relative terminal error
 (`terminal_error / reach_distance`), which puts the point mass (reach 0.5) and arm
-(reach 0.1) on the same scale. Binary success is DEMOTED to a readability aid and shown
+(reach 0.1) on the same scale. Binary success is a secondary readability aid, shown
 at two fixed reach fractions (10% and 5%); it is recomputed here from stored FT/goal at a
-reach-relative bar, NOT read from the artifact's training-time `metrics` (which used an
-unscaled absolute 0.05 radius -- see analysis.reach_metrics).
+reach-relative bar, not read from the artifact's training-time `metrics` (which used an
+unscaled absolute 0.05 radius, see analysis.reach_metrics).
 
 The RFLO-BPTT gap in mean reach-relative terminal error is what the TOST equivalence test
-(Delta = 5% of reach, frozen 2026-09-01) will adjudicate at N=15. At small n this is
-DIRECTION ONLY -- no equivalence verdict.
+(Delta = 5% of reach, frozen 2026-09-01) will adjudicate at N=15. At small n this is a
+direction only, not an equivalence verdict.
 
 Usage:
     python summarize_behavior.py --dir results/clean --n-seeds 15 --per-seed
@@ -32,14 +32,25 @@ from analysis import (
 
 # Frozen behavior-matching criteria (set before inspecting any BPTT-vs-RFLO outcome).
 TOST_MARGIN_FRAC = 0.05  # Delta for the equivalence test, as a fraction of reach.
-SUCCESS_FRACS = (0.10, 0.05)  # binary success bars, as fractions of reach (readability only)
+SUCCESS_FRACS = (
+    0.10,
+    0.05,
+)  # binary success bars, as fractions of reach (readability only)
 
 
 def _load_ft_goal(d):
     """Extract batch-first FT (n_targets, T, 2) and goal (n_targets, 2) from an artifact,
     mirroring diagnose_endpoints.py: FT is stored (T, B, 2) by inference()."""
-    FT = d["FT"].detach().cpu().numpy() if torch.is_tensor(d["FT"]) else np.asarray(d["FT"])
-    goal = d["goal"].detach().cpu().numpy() if torch.is_tensor(d["goal"]) else np.asarray(d["goal"])
+    FT = (
+        d["FT"].detach().cpu().numpy()
+        if torch.is_tensor(d["FT"])
+        else np.asarray(d["FT"])
+    )
+    goal = (
+        d["goal"].detach().cpu().numpy()
+        if torch.is_tensor(d["goal"])
+        else np.asarray(d["goal"])
+    )
     goal = goal.reshape(goal.shape[0], -1)[:, :2]
     if FT.shape[0] != goal.shape[0]:  # (T, B, 2) -> (B, T, 2)
         FT = np.transpose(FT, (1, 0, 2))
@@ -64,8 +75,12 @@ def cell_stats(results_dir, effector, rule, n_seeds):
         FT, goal = _load_ft_goal(d)
         rel_terr.append(float(reach_relative_terminal_error(FT, goal, effector).mean()))
         # Reuse reach_metrics with a reach-scaled bar so success is comparable across effectors.
-        succ10.append(reach_metrics(FT, goal, success_radius=SUCCESS_FRACS[0] * reach)[0])
-        succ05.append(reach_metrics(FT, goal, success_radius=SUCCESS_FRACS[1] * reach)[0])
+        succ10.append(
+            reach_metrics(FT, goal, success_radius=SUCCESS_FRACS[0] * reach)[0]
+        )
+        succ05.append(
+            reach_metrics(FT, goal, success_radius=SUCCESS_FRACS[1] * reach)[0]
+        )
         # Path deviation is also in effector units, so scale it too for cross-effector reads.
         dev.append(reach_metrics(FT, goal)[1] / reach)
     return {
@@ -92,8 +107,10 @@ def main():
     args = ap.parse_args()
 
     print(f"Behavioral summary for {args.dir} (up to {args.n_seeds} seeds)")
-    print("PRIMARY metric = reach-relative terminal error (mean+-sd over seeds). "
-          f"success bars: {SUCCESS_FRACS[0]:.0%}/{SUCCESS_FRACS[1]:.0%} of reach (readability).\n")
+    print(
+        "Primary metric = reach-relative terminal error (mean+-sd over seeds). "
+        f"success bars: {SUCCESS_FRACS[0]:.0%}/{SUCCESS_FRACS[1]:.0%} of reach (readability).\n"
+    )
     header = (
         f"{'effector':18s} {'rule':4s} {'n':>2s}  {'final_loss':>10s}  "
         f"{'rel_terr':>16s}  {'succ@10%':>8s}  {'succ@5%':>8s}  {'path_dev':>8s}"
@@ -125,10 +142,10 @@ def main():
         if len(cells["BPTT"]["final"]) and len(cells["RFLO"]["final"]):
             gap = cells["RFLO"]["rel_terr"].mean() - cells["BPTT"]["rel_terr"].mean()
             n_min = min(len(cells["BPTT"]["final"]), len(cells["RFLO"]["final"]))
-            verdict = "within" if abs(gap) <= TOST_MARGIN_FRAC else "OUTSIDE"
-            tag = "" if n_min >= 15 else "  [DIRECTION ONLY, n<15 -- no TOST verdict]"
+            verdict = "within" if abs(gap) <= TOST_MARGIN_FRAC else "outside"
+            tag = "" if n_min >= 15 else "  [direction only, n<15, no TOST verdict]"
             print(
-                f"{'':18s} GAP  ->  RFLO-BPTT rel_terr {gap:+.3f}  "
+                f"{'':18s} gap  ->  RFLO-BPTT rel_terr {gap:+.3f}  "
                 f"({verdict} Delta={TOST_MARGIN_FRAC:.2f}){tag}\n"
             )
 

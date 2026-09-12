@@ -3,11 +3,11 @@
 The math is split across four channels plus shared plumbing, mirroring the
 paper's structure:
 
-- ``io``         -- artifact loading and per-direction H reshaping.
-- ``behavior``   -- reach-outcome metrics (concrete channel).
-- ``activation`` -- hidden-state PCA + DSA (primary, gauge-invariant channel).
-- ``weights``    -- ΔW corridor geometry (corroboration, gauge-safe frame only).
-- ``stats``      -- grouped dispersion summaries and permutation tests.
+- ``io``: artifact loading and per-direction H reshaping.
+- ``behavior``: reach-outcome metrics (concrete channel).
+- ``activation``: hidden-state PCA + DSA (primary, gauge-invariant channel).
+- ``weights``: ΔW corridor geometry (corroboration, gauge-safe frame only).
+- ``stats``: grouped dispersion summaries and permutation tests.
 
 Public names are re-exported here so ``from analysis import <name>`` and
 ``analysis.<name>`` keep working; the channel modules are the place to add new

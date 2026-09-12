@@ -46,7 +46,7 @@ def load_all_runs(results_dir, effector, seeds, rules=("BPTT", "RFLO")):
 
 
 def extract_per_direction_trajectories(run):
-    """Reshape one saved run's H -- (T, n_targets, n_rec) -- into a list of
+    """Reshape one saved run's H, shaped (T, n_targets, n_rec), into a list of
     (T, n_rec) per-direction trajectories for DSA.
     """
     H = run["H"]
