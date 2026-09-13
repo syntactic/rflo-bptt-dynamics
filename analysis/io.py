@@ -13,6 +13,20 @@ import torch
 from ._common import _to_numpy
 
 
+def loss_windows(losses, window=2000):
+    """Non-overlapping window means of a training-loss curve."""
+    L = np.asarray(losses, dtype=float)
+    return np.array(
+        [L[i : i + window].mean() for i in range(0, len(L) - window + 1, window)]
+    )
+
+
+def converged(losses, window=2000, tol=2e-3, loss_gate=0.10):
+    """Checks to see if a run converges. Loss needs to plateau and also be below 0.1."""
+    w = loss_windows(losses, window)
+    return bool(len(w) >= 2 and (w[-2] - w[-1]) < tol and w[-1] < loss_gate)
+
+
 def load_experiment_run(results_dir, effector, seed, rule):
     """Load and validate a single experiment artifact dictionary."""
     results_dir = Path(results_dir)

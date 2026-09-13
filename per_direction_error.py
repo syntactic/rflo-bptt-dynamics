@@ -12,22 +12,16 @@ import argparse
 import numpy as np
 import torch
 
-from analysis import reach_distance
+from analysis import reach_relative_terminal_error
 
 
 def per_direction_rel_error(path):
-    """(n_targets,) reach-relative terminal error for one saved run.
-
-    FT is (T, n_targets, 2); goal is (n_targets, 2). Terminal error is the
-    endpoint-to-target distance at the final timestep, divided by the effector's
-    reach distance.
-    """
+    """(n_targets,) reach-relative terminal error for one saved run."""
     d = torch.load(path, map_location="cpu")
     FT = d["FT"].detach().cpu().numpy()
-    goal = d["goal"].detach().cpu().numpy()
-    effector = d["effector"]
-    final = FT[-1]  # (n_targets, 2)
-    return np.linalg.norm(final - goal, axis=-1) / reach_distance(effector)
+    # Artifacts store FT time-first; the library metric wants batch-first.
+    FT = np.transpose(FT, (1, 0, 2))
+    return reach_relative_terminal_error(FT, d["goal"], d["effector"])
 
 
 def main():

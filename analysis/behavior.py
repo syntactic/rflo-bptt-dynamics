@@ -23,6 +23,9 @@ def perp_dist(traj, a, b):
     return np.abs(cross) / L
 
 
+SUCCESS_FRAC = 0.05  # success bar, as a fraction of reach
+
+
 def reach_distance(effector):
     """Reach distance (target radius from center) for an effector, matching the value
     run_experiment.py trained with. Used to convert absolute terminal error into a
@@ -50,10 +53,19 @@ def reach_relative_terminal_error(FT, targets, effector):
     return terminal_error(FT, targets) / reach_distance(effector)
 
 
-def reach_metrics(FT, targets, center=None, success_radius=0.05):
+def success_radius(effector, frac=SUCCESS_FRAC):
+    """Success bar as a fraction of the effector's reach distance."""
+    return frac * reach_distance(effector)
+
+
+def reach_metrics(FT, targets, center=None, *, success_radius):
     """Per-target success (did the final fingertip land within `success_radius`
     of the target?) and mean straight-line path deviation. targets is an array of
     pairs and center is a single pair.
+
+    `success_radius` is absolute and has no default: a shared 0.05 is 50% of the
+    arm's reach and 10% of the point mass's, which silently biases any
+    cross-effector comparison. Pass success_radius(effector).
 
     Returns (success_rate in [0,1], mean_path_deviation).
     """
@@ -71,7 +83,7 @@ def reach_metrics(FT, targets, center=None, success_radius=0.05):
     return float(np.mean(succ)), float(np.mean(dev))
 
 
-def per_direction_metrics(FT, targets, direction_idx, success_radius=0.05):
+def per_direction_metrics(FT, targets, direction_idx, *, success_radius):
     """Per direction success, assumes that we're doing center out because we have direction indices"""
 
     targets = _to_numpy(targets)

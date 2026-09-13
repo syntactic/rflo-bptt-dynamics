@@ -22,6 +22,7 @@ from analysis import (
     reach_metrics,
     reach_relative_terminal_error,
     subspace_distance_matrix,
+    success_radius,
     summarize_within_between,
     terminal_error,
 )
@@ -230,6 +231,20 @@ def test_reach_metrics():
     succ, dev = reach_metrics(FT, targets, success_radius=0.05)
     assert succ == 1.0
     assert np.isclose(dev, 0.0)
+
+
+def test_success_radius_scales_per_effector():
+    # A shared absolute bar is 50% of the arm's reach and 10% of the point mass's, which
+    # biases every cross-effector behavioral comparison.
+    assert success_radius("RigidTendonArm26") == pytest.approx(0.005)
+    assert success_radius("ReluPointMass24") == pytest.approx(0.025)
+
+
+def test_reach_metrics_requires_explicit_radius():
+    FT = np.zeros((1, 10, 2))
+    targets = np.array([[0.1, 0.0]])
+    with pytest.raises(TypeError):
+        reach_metrics(FT, targets)
 
 
 def test_reach_distance():

@@ -13,15 +13,9 @@ import glob
 import os
 import re
 
-import numpy as np
 import torch
 
-
-def loss_windows(losses, window):
-    L = np.asarray(losses, dtype=float)
-    return np.array(
-        [L[i : i + window].mean() for i in range(0, len(L) - window + 1, window)]
-    )
+from analysis import loss_windows
 
 
 def main():

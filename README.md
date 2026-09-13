@@ -150,7 +150,7 @@ python per_direction_error.py --dir results/evaryB_fixB_wh --rules RFLO --seeds 
 python summarize_behavior.py --dir results/pm_lr0.01_N15 --n-seeds 15
 
 # activation space: DSA over hidden-state trajectories
-python run_activation_dsa_lean.py RigidTendonArm26 --results-dir results/clean \
+python run_activation_dsa.py RigidTendonArm26 --results-dir results/clean \
     --seeds 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14
 
 # weight space: learning-subspace angles and weight-displacement geometry
@@ -195,7 +195,7 @@ shuffling labels across seeds, and a family of tests is Holm-corrected.
 ├── check_convergence.py      # the convergence gate
 ├── per_direction_error.py    # per-direction reach error
 ├── summarize_behavior.py     # reach-relative error and scaled success
-├── run_activation_dsa_lean.py# activation-space DSA at N=15
+├── run_activation_dsa.py# activation-space DSA at N=15
 ├── run_subspace_geometry.py  # learning-subspace (Grassmann) geometry
 ├── delta_w_geometry.py       # weight-displacement cosine and participation ratio
 ├── run_paired_permutation.py # paired permutation tests with Holm correction

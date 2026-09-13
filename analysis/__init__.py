@@ -21,21 +21,23 @@ from .activation import (
     run_dsa,
 )
 from .behavior import (
+    SUCCESS_FRAC,
     per_direction_metrics,
     perp_dist,
     reach_distance,
     reach_metrics,
     reach_relative_terminal_error,
+    success_radius,
     terminal_error,
 )
 from .io import (
+    converged,
     extract_per_direction_trajectories,
     load_all_runs,
     load_experiment_run,
+    loss_windows,
 )
 from .stats import (
-    _seed_to_pair,
-    _within_mean,
     calculate_p_value_of_dsa_distance,
     calculate_stats_foreach_grouping,
     holm_bonferroni,
@@ -59,6 +61,8 @@ from .weights import (
 
 __all__ = [
     # io
+    "converged",
+    "loss_windows",
     "load_experiment_run",
     "load_all_runs",
     "extract_per_direction_trajectories",
@@ -69,6 +73,8 @@ __all__ = [
     "reach_relative_terminal_error",
     "reach_metrics",
     "per_direction_metrics",
+    "success_radius",
+    "SUCCESS_FRAC",
     # activation
     "process_activation_trajectories",
     "run_dsa",

@@ -6,8 +6,17 @@ import motornet as mn
 import numpy as np
 import torch
 
+from analysis import SUCCESS_FRAC
 from rnn import LeakyRNN
 from trainers import *
+
+# 8k steps at lr=0.05 undertrained the arm and put RFLO in a different learning-rate
+# regime than BPTT on the point mass, so seeds from that regime are not comparable with
+# anything current. Each effector defaults to the regime its results were produced in.
+DEFAULT_REGIME = {
+    "RigidTendonArm26": {"lr": 0.025, "num_steps": 40000},
+    "ReluPointMass24": {"lr": 0.01, "num_steps": 70000},
+}
 
 
 def save_artifact(
@@ -76,6 +85,9 @@ def save_artifact(
             "state_dict": {k: _to_cpu(v) for k, v in state_dict.items()},
             "feedback_matrix": _to_cpu(feedback_matrix),  # RFLO B; None for BPTT
             "reaching_distance": reaching_distance,
+            # Radius the stored `metrics` counted as a hit. Artifacts written before
+            # 2026-09-12 lack this key and used an unscaled 0.05 for both effectors.
+            "success_radius": SUCCESS_FRAC * reaching_distance,
         },
         file_path,
     )
@@ -114,14 +126,17 @@ def parse_args():
     parser.add_argument(
         "--num-steps",
         type=int,
-        default=8000,
-        help="Training iterations per model (default: 8000)",
+        default=None,
+        help="Training iterations per model (default: per-effector, see DEFAULT_REGIME)",
     )
     parser.add_argument(
         "--batch-size", type=int, default=32, help="Batch size (default: 32)"
     )
     parser.add_argument(
-        "--lr", type=float, default=5e-2, help="Learning rate for SGD (default: 0.05)"
+        "--lr",
+        type=float,
+        default=None,
+        help="Learning rate for SGD (default: per-effector, see DEFAULT_REGIME)",
     )
     parser.add_argument(
         "--loss",
@@ -198,9 +213,16 @@ if __name__ == "__main__":
     args = parse_args()
     seeds = args.seeds if args.seeds is not None else list(range(args.n_seeds))
 
+    regime = DEFAULT_REGIME[args.effector]
+    if args.lr is None:
+        args.lr = regime["lr"]
+    if args.num_steps is None:
+        args.num_steps = regime["num_steps"]
+
     print(
         f"Running experiment on {args.effector} across seeds {seeds} (num_steps={args.num_steps}, lr={args.lr}, b_seed={args.b_seed}, device={args.device})..."
     )
+
     reaching_distance = 0.1 if "Arm" in args.effector else 0.5
     effector_cls = getattr(mn.effector, args.effector)
 

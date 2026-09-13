@@ -1,10 +1,8 @@
 """Weight-space channel: corroboration only, and only in a gauge-safe frame.
 
-Hidden units have no canonical labeling, so raw cross-seed weight geometry mixes
-real differences with relabeling artifacts. The ΔW-corridor metrics here are
-meant for the shared-init paired frame (or after permutation alignment). DSA is
-not applied to weights: learning trajectories are non-autonomous optimizer
-transients, not autonomous flows, so direct geometry is the right tool.
+These metrics are valid for the shared-init paired frame, or after permutation
+alignment; raw cross-seed weight geometry is confounded by unit relabeling. DSA is
+deliberately absent. See METHODS_PRIMER.md §3.1 and §6.
 """
 
 from collections import defaultdict

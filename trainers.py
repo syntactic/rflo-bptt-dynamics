@@ -3,7 +3,7 @@ import copy
 import numpy as np
 import torch
 
-from analysis import per_direction_metrics
+from analysis import SUCCESS_FRAC, per_direction_metrics
 from rnn import LeakyRNN
 
 
@@ -103,7 +103,10 @@ class BaseTrainer:
         options = {"direction_idx": np.arange(self.env.n_targets)}
         H, Y, FT, goals, direction_idx = self.inference(options=options)
         FT = FT.permute(1, 0, 2)
-        return per_direction_metrics(FT, goals, direction_idx)
+        # Scale the success bar to this effector's reach: a shared absolute radius is
+        # 50% of the arm's reach and 10% of the point mass's.
+        radius = SUCCESS_FRAC * self.env.reaching_distance
+        return per_direction_metrics(FT, goals, direction_idx, success_radius=radius)
 
 
 class BPTTTrainer(BaseTrainer):

@@ -1,42 +1,28 @@
-"""Apply the paired (block) permutation test for within-group dispersion
-asymmetry to trained runs, across a set of two-group contrasts and both geometry
-views (activation DSA distances and weight ΔW cosines), then correct the family
-of p-values for multiple comparisons with Holm-Bonferroni.
+"""Paired (block) permutation tests over a set of two-group contrasts, Holm-corrected.
 
-A contrast is a *cell*: an effector, a saved distance/similarity matrix, and two
-groups. Each group is `label=directory[=suffix]`: the label it goes by in the
-matrix, the directory its `.pt` artifacts live in, and the filename rule suffix
-(defaulting to the label). This one shape covers both contrasts the project runs:
+Runs both geometry views (activation DSA distances, weight dW cosines) and corrects the
+resulting family with Holm-Bonferroni. `--metrics` restricts the run, and therefore the
+family, to one view.
 
-  learning rule    one directory, two suffixes:
-    BPTT=results/clean  RFLO=results/clean
-  feedback condition (E-varyB)   two directories, one suffix (RFLO):
-    varyB=results/evaryB_varyB=RFLO  fixB=results/evaryB_fixB=RFLO
+A contrast is a cell: an effector, a saved matrix, and two groups. Each group is
+`label=directory[=suffix]` (the label it goes by in the matrix, where its `.pt` files
+live, and the filename rule suffix, defaulting to the label):
 
-Group order is (baseline, hypothesized-tighter): a positive observed statistic
-means the *second* group clusters tighter than the first. For E-varyB the
-canalization prediction (shared B tightens the cluster) is fixB tighter, so pass
-`varyB=... fixB=...`.
+  learning rule                 BPTT=results/clean  RFLO=results/clean
+  feedback condition            varyB=results/evaryB_varyB=RFLO  fixB=results/evaryB_fixB=RFLO
 
-The exchangeable unit is the seed: the two group members for a seed share their
-initialization and target stream, so the null flips the group label within each
-seed rather than shuffling labels across seeds. See analysis.paired_permutation_test.
+Group order is (baseline, hypothesized-tighter): a positive observed statistic means the
+SECOND group clusters tighter. The exchangeable unit is the seed, whose two members share
+an initialization and target stream (see analysis.paired_permutation_test).
 
-Example:
     python run_paired_permutation.py \
         --cell RigidTendonArm26 results/clean/RigidTendonArm26_activation_dsa_matrix.npy \
                BPTT=results/clean RFLO=results/clean \
-        --cell RigidTendonArm26 results/RigidTendonArm26_condition_dsa_matrix.npy \
-               varyB=results/evaryB_varyB=RFLO fixB=results/evaryB_fixB=RFLO \
         --exclude-seeds 0 --n-seeds 15
 
-Activation DSA is read from the matrix named on the cell; its row order comes from a
-`<...>_labels.json` sidecar next to the matrix (written by run_condition_dsa.py),
-falling back to a group-major construction from `--seeds` when no sidecar exists. A
-cell whose matrix is missing has its DSA view skipped. Weight ΔW cosines are built
-here by loading each artifact once and keeping only its flattened ΔW, so the full
-weight histories never sit in memory together; a cell whose artifacts carry no
-weight history (behavior-only runs) has its ΔW view skipped.
+Row order for a matrix comes from its `<...>_labels.json` sidecar, falling back to a
+group-major construction from `--seeds`. A cell whose matrix is missing skips the DSA
+view; a cell whose artifacts carry no weight history skips the dW view.
 """
 
 import argparse
@@ -126,6 +112,18 @@ def _drop_excluded(labels, exclude):
     return keep, [labels[i] for i in keep]
 
 
+def _select_groups(labels, group_labels):
+    """Keep only the rows belonging to this cell's two groups.
+
+    One matrix can hold more than two conditions, and a two-group block of it is the
+    same block that pair would produce alone (see run_condition_dsa.py), so a contrast
+    is tested by subsetting rather than by recomputing.
+    """
+    wanted = set(group_labels)
+    keep = [i for i, lab in enumerate(labels) if lab.split("-")[0] in wanted]
+    return keep, [labels[i] for i in keep]
+
+
 def _check_pairing(labels, group_labels):
     """Every label prefix is one of the two groups, and every seed carries both,
     otherwise _paired_stat's unconditional pair[group] lookups fail cryptically."""
@@ -160,6 +158,8 @@ def dsa_result(cell, seeds, exclude):
     keep, kept_labels = _drop_excluded(labels, exclude)
     M = M[np.ix_(keep, keep)]
     group_labels = [g.label for g in cell.groups]
+    keep, kept_labels = _select_groups(kept_labels, group_labels)
+    M = M[np.ix_(keep, keep)]
     _check_pairing(kept_labels, group_labels)
     res = analysis.paired_permutation_test(
         M, kept_labels, metric_is_similarity=False, rule_kinds=tuple(group_labels)
@@ -254,6 +254,14 @@ def main():
         help="seeds to drop from every cell (e.g. a degenerate condition pair). "
         "Applies to all cells in this invocation.",
     )
+    p.add_argument(
+        "--metrics",
+        nargs="+",
+        choices=["activation_dsa", "delta_w_cosine"],
+        default=["activation_dsa", "delta_w_cosine"],
+        help="which channels to test in this invocation; also fixes the Holm family, "
+        "so restrict it when a channel is corrected on its own",
+    )
     p.add_argument("--alpha", type=float, default=0.05)
     p.add_argument(
         "--out",
@@ -274,6 +282,8 @@ def main():
             ("activation_dsa", dsa_result),
             ("delta_w_cosine", delta_w_result),
         ):
+            if metric_name not in args.metrics:
+                continue
             res = fn(cell, seeds, exclude)
             if res is None:
                 skipped.append((cid, metric_name))
