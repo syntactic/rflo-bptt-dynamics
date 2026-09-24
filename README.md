@@ -6,9 +6,8 @@ learning; [Murray, _eLife_ 2019](https://elifesciences.org/articles/43299)), whi
 the transported gradient with a fixed random feedback matrix `B` and local eligibility
 traces. Both drive [MotorNet](https://github.com/OlivierCodol/MotorNet) effectors: a planar
 point mass with four Cartesian actuators, and a two-joint arm with six Hill-type muscles.
-The question is what the learning rule does to the _set_ of solutions. If credit is assigned
-through one fixed random projection, do independently initialized networks end up in the
-same corner of solution space, while exact gradients let them scatter?
+RFLO learns the point mass as well as BPTT and plateaus on the arm at more than twice
+BPTT's error. We want to know what that failure looks like and what causes it.
 
 This project started as a [Neuromatch Academy](https://academy.neuromatch.io/) project.
 
@@ -24,43 +23,66 @@ This project started as a [Neuromatch Academy](https://academy.neuromatch.io/) p
 
 ![Summary figure](figures/canalization_summary.png)
 
-Arm, 17 seeds that converged in every condition, lr 0.025, 40k steps, 64 units.
+Arm, 17 seeds that converged in every condition, lr 0.025, 40k steps, 64 units. "Shared `B`"
+means every RFLO seed uses the same feedback matrix. "Per-seed `B`" gives each seed its own,
+which is how RFLO is usually run.
 
-**Sharing one feedback matrix aligns the weight updates.** Each seed's recurrent weight
-trajectory has a learning subspace: the top-3 directions its weights actually moved along.
-Between two RFLO seeds that share `B`, those subspaces sit 70.3° apart. Between two BPTT
-seeds, 84.1°. Two independent 3-dimensional subspaces of a 4096-dimensional space are 88.7°
-apart, so BPTT seeds are nearly as unrelated as random ones and RFLO seeds are not
-(paired permutation over seeds, p = 1.5e-5).
+**RFLO plateaus on the arm.** RFLO's reaches end 0.27 of the reach distance from the target on
+average, and BPTT's end 0.11 away. The gap holds at every learning rate we tried (0.01 to
+0.05). Wider networks (128 units for 100k steps, 256 for 120k) stay at the same plateau, and a
+loss weighted toward the end of the reach lowers the error without changing its pattern.
 
-**The alignment comes from sharing `B`, and not from RFLO's locality.** Give each RFLO seed its own
-feedback matrix and the angle returns to 88.6°, the random value, with everything else
-held fixed (p = 1.5e-5). A second, independent weight metric agrees: seeds sharing `B`
-move their weights along directions with a mean pairwise cosine of 0.40, spread over an
-effective 4.8 of 17 dimensions, against a chance cosine of 0.016. The paired difference
-against per-seed `B` is 0.387 (Holm-corrected p = 3.1e-5 over the two contrasts).
+**The errors lie along one axis.** Panel C: RFLO's errors lie along the axis from the rightward
+target (direction 0) to the leftward one (direction 4). Each seed is worst at one of the two
+poles, and its error falls off with distance from that pole. With a shared `B`, all 17 seeds
+are worst at direction 0 or 4 (6 and 11 seeds). BPTT is flat at 0.11 in every direction. Which
+pole a seed fails at depends on both its initialization and its `B`: swapping `B` at a fixed
+initialization flips 7 of 17 networks. The axis is not the arm's inertia. At the start posture
+the hand is hardest to accelerate along the forearm, 36° away from it.
 
-**Function space and behavior lean the same way.** Activation-space
-DSA distance between seeds is 0.047 with a shared `B` against 0.069 with per-seed `B`, and
-the across-seed spread of the reach profile is 0.785 against 0.845. Neither reaches
-significance under the paired null (p = 0.075 and 0.097). Additional analysis is planned comparing
-untrained networks.
+**RFLO's weight changes stay in a few directions.** Williams, Payeur & Lajoie
+([arXiv:2606.00243](https://arxiv.org/abs/2606.00243)) show that in linear RNNs, RFLO's
+solutions are low-rank perturbations of the initial weights. We see the same constraint in a
+nonlinear network controlling a closed-loop arm. Each seed's recurrent weight trajectory has a
+learning subspace: the top-3 directions its weights moved along. RFLO seeds that share `B` have
+subspaces 70.3° apart. BPTT seeds are 84.1° apart, per-seed-`B` RFLO seeds 88.6°, and two
+random 3-dimensional subspaces of the 4096-dimensional weight space 88.7° (paired permutation
+over seeds, p = 1.5e-5 for both contrasts). The cosine between seeds' weight changes agrees:
+0.40 with a shared `B`, spread over an effective 4.8 of 17 dimensions, against 0.016 by chance.
+When `B` is the network's own readout (the exact credit direction, rescaled to a random `B`'s
+norm), seeds sit 85.0° apart, close to BPTT, and the arm error only drops from 0.27 to 0.25.
 
-**RFLO's arm deficit is not uniform.** Panel C: each RFLO seed fails one of two
-opposing arcs of the target ring and handles the other, splitting 10 to 7 across seeds, while
-BPTT stays flat at 0.11 of reach in every direction. This rules out the reading that RFLO simply
-undertrains. Which arc a seed fails depends on both its initialization and its `B`: swapping
-`B` at a fixed initialization flips the arc for 7 of 17 networks.
+**The shared weight directions don't show up in dynamics or behavior.** Activation-space DSA
+distance between seeds is 0.047 with a shared `B` and 0.069 with per-seed `B` (paired p =
+0.073). The across-seed spread of the reach profile is 0.784 and 0.824 (p = 0.249). BPTT
+seeds are closer to each other in activation space than RFLO seeds are: 0.029 against 0.047
+(p = 1.5e-3). BPTT also reaches much better on the arm, so part of that gap may come from
+performance.
 
 **The point mass as a negative control.** At a shared learning rate of 0.01 the two rules
-land within 1.3% and 2.0% of reach distance of the target (15 seeds each), a gap well
-inside the 5% equivalence margin, and every run finishes within 10% of reach on every
-direction. At that matched behavior the weight geometry shows no corridor: RFLO seeds sit
-86.5° apart against BPTT's 88.5° and a null of 88.7°, with a participation ratio of 14.4
-out of 15 across-seed directions.
+land within 1.3% and 2.0% of reach distance of the target (15 seeds each), a gap inside the 5%
+equivalence margin, and every run finishes within 10% of reach on every direction. There the
+weight geometry shows no shared directions: RFLO seeds sit 86.5° apart against BPTT's 88.5°
+and a null of 88.7°, with a participation ratio of 14.4 out of 15 across-seed directions.
 
-**Training stability.** A shared `B` also makes RFLO easier to optimize: 24 of 26 arm seeds
-converged with a shared `B` against 20 of 26 with per-seed `B`, and 26 of 26 for BPTT.
+**Training stability.** RFLO converged in 24 of 26 arm seeds with a shared `B`, 20 of 26 with
+per-seed `B`, and BPTT in 26 of 26.
+
+### Open questions
+
+- **Why does RFLO fail the arm?** Either its fixed update directions are enough to cause the
+  failure, or its approximate credit is the problem. RFLO's error signal here is
+  backpropagated through the arm's dynamics, but it drops credit through the network's own
+  recurrence and through the sensory loop. On a first look at 5 seeds, RFLO's total change in
+  recurrent weights has an effective rank of about 1.8 against BPTT's 4.7, and 59% of it lies
+  along `B` (9% by chance). Next we'll train BPTT with its gradients projected onto the span of
+  `B`. If it fails along the same axis, the directions are enough. If it learns the arm, the
+  credit is what's missing.
+- **What sets the axis?** Inertia doesn't. The muscles' force capacity varies with direction
+  and is the next candidate.
+- **How often does a network change poles?** Each network has been trained with only one
+  alternate `B`, so 7 of 17 is a lower bound. Training a few networks with many `B`s each
+  would measure it.
 
 ### Notes
 
