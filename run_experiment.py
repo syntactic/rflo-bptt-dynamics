@@ -10,9 +10,9 @@ from analysis import SUCCESS_FRAC
 from rnn import LeakyRNN
 from trainers import *
 
-# 8k steps at lr=0.05 undertrained the arm and put RFLO in a different learning-rate
-# regime than BPTT on the point mass, so seeds from that regime are not comparable with
-# anything current. Each effector defaults to the regime its results were produced in.
+# Per-effector defaults: the regime current results were run in. The older 8k steps
+# at lr=0.05 undertrained the arm and mismatched the rules' lr regimes on the point
+# mass, so runs from it are not comparable.
 DEFAULT_REGIME = {
     "RigidTendonArm26": {"lr": 0.025, "num_steps": 40000},
     "ReluPointMass24": {"lr": 0.01, "num_steps": 70000},
@@ -43,6 +43,7 @@ def save_artifact(
     state_dict,
     feedback_matrix,
     reaching_distance,
+    grad_basis_seed=None,
 ):
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
@@ -73,20 +74,22 @@ def save_artifact(
             "lr": lr,
             "batch_size": batch_size,
             "effector": effector,
-            # Provenance for the clean-vs-noisy condition. Zero on clean runs;
-            # b_seed is meaningful only for the RFLO feedback matrix (None for BPTT).
+            # Condition provenance. Noise is zero on clean runs; b_seed is None for BPTT.
             "proprioception_noise": proprioception_noise,
             "vision_noise": vision_noise,
             "b_seed": b_seed,
             # {"type": "trajectory"} or {"type": "terminal", "w_term":..., "k":...}
             "loss": loss_meta,
-            # Final trained weights (W_in/W_rec/W_out, ~KB) so the network can be
-            # reloaded and run for new inference
+            # Final weights (~KB), so the trained network can be reloaded
             "state_dict": {k: _to_cpu(v) for k, v in state_dict.items()},
-            "feedback_matrix": _to_cpu(feedback_matrix),  # RFLO B; None for BPTT
+            # RFLO's B. For BPTT, the projection basis if gradients were projected,
+            # else None.
+            "feedback_matrix": _to_cpu(feedback_matrix),
+            # None for RFLO and for unprojected BPTT
+            "grad_basis_seed": grad_basis_seed,
             "reaching_distance": reaching_distance,
-            # Radius the stored `metrics` counted as a hit. Artifacts written before
-            # 2026-09-12 lack this key and used an unscaled 0.05 for both effectors.
+            # Hit radius used for `metrics`. Artifacts from before 2026-09-12 lack
+            # this key and used a fixed 0.05 for both effectors.
             "success_radius": SUCCESS_FRAC * reaching_distance,
         },
         file_path,
@@ -183,6 +186,17 @@ def parse_args():
         ),
     )
     parser.add_argument(
+        "--bptt-grad-basis-seed",
+        type=int,
+        default=None,
+        help=(
+            "Project BPTT's W_rec and W_in gradients onto the span of the feedback "
+            "matrix drawn from this seed before each SGD step (W_out is left free). "
+            "Restricts exact gradients to the update directions RFLO has with that B. "
+            "Default: no projection."
+        ),
+    )
+    parser.add_argument(
         "--proprioception-noise",
         type=float,
         default=0.0,
@@ -226,7 +240,7 @@ if __name__ == "__main__":
     reaching_distance = 0.1 if "Arm" in args.effector else 0.5
     effector_cls = getattr(mn.effector, args.effector)
 
-    # Same loss object drives both trainers so BPTT vs RFLO stays matched.
+    # Both trainers share one loss function so the rules stay matched
     if args.loss == "terminal":
         loss_fn = make_terminal_weighted_loss(args.terminal_weight, args.terminal_k)
         loss_meta = {
@@ -240,7 +254,7 @@ if __name__ == "__main__":
 
     for seed in seeds:
         print(f"\n--- Training Seed {seed} ---")
-        # Build fresh effector and environment per seed to prevent tensor autograd graph retention in deepcopy
+        # Fresh effector per seed: a reused one holds autograd tensors that break deepcopy(env)
         if "Arm" in args.effector:
             effector = effector_cls(mn.muscle.RigidTendonHillMuscle())
         else:
@@ -260,8 +274,8 @@ if __name__ == "__main__":
         )
         rflo_net = copy.deepcopy(bptt_net)
 
-        # Aligned modes use live W_out transpose rather than static random B (B=None).
-        # 'aligned-matched' rescales W_out to random B's expected norm to isolate direction from gain.
+        # Aligned modes feed back through the live W_out (B=None); 'aligned-matched'
+        # also rescales it to random B's expected norm.
         b_arg = args.b_seed.lower()
         b_norm_match = b_arg == "aligned-matched"
         rflo_b_seed = (
@@ -272,11 +286,22 @@ if __name__ == "__main__":
             else int(args.b_seed)
         )
 
+        # Uses its own generator, so the shared init and target stream are unchanged
+        grad_basis = None
+        if args.bptt_grad_basis_seed is not None:
+            grad_basis = make_feedback_matrix(
+                bptt_net.n_rec,
+                bptt_net.n_out,
+                seed=args.bptt_grad_basis_seed,
+                device=args.device,
+            )
+
         bptttrainer = BPTTTrainer(
             bptt_net,
             center_out,
             loss_fn,
             lr=args.lr,
+            grad_basis=grad_basis,
             device=args.device,
             record_weights=not args.no_weight_history,
         )
@@ -292,7 +317,10 @@ if __name__ == "__main__":
         )
 
         if args.rule in ("both", "bptt"):
-            print(f"Training BPTT (seed={seed})...")
+            print(
+                f"Training BPTT (seed={seed}, "
+                f"grad_basis_seed={args.bptt_grad_basis_seed})..."
+            )
             losses, metrics = bptttrainer.train(
                 num_steps=args.num_steps, batch_size=args.batch_size, seed=seed
             )
@@ -318,11 +346,12 @@ if __name__ == "__main__":
                 "BPTT",
                 args.proprioception_noise,
                 args.vision_noise,
-                None,  # B is not used by BPTT
+                None,  # BPTT has no B
                 loss_meta,
                 bptt_net.state_dict(),
-                None,  # no feedback matrix for BPTT
+                grad_basis,  # None unless the gradients were projected
                 reaching_distance,
+                grad_basis_seed=args.bptt_grad_basis_seed,
             )
 
         if args.rule in ("both", "rflo"):
@@ -355,10 +384,10 @@ if __name__ == "__main__":
                 "RFLO",
                 args.proprioception_noise,
                 args.vision_noise,
-                # Distinguish 'aligned' from 'aligned-matched' in metadata (both have B=None)
+                # Keeps 'aligned' and 'aligned-matched' apart (both have B=None)
                 b_arg if rflo_b_seed is None else rflo_b_seed,
                 loss_meta,
                 rflo_net.state_dict(),
-                rflotrainer.B,  # this would be None if we're aligned
+                rflotrainer.B,  # None in aligned modes
                 reaching_distance,
             )
