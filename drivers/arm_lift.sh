@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Can RFLO's arm plateau be lifted, and does the feedback matrix B set where it fails?
+# Can RFLO's arm error at 40k be lowered, and does the feedback matrix B set where it fails?
 #
 #   Bonly    : one network, B swept over 5 values. Init and target stream are fixed, so
 #              anything that moves in the reach profile is attributable to B alone.

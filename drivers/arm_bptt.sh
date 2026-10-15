@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# BPTT on the arm, matched to the RFLO baseline (lr=0.025, 40k steps, 64 units).
+# BPTT on the arm, matched to the RFLO baseline (lr=0.025, 64 units, 40k steps by default).
 #
 # This is the shared-init partner for the rule contrast: seed s here starts from the
 # same initialization as seed s under RFLO, which is what makes the paired permutation
@@ -10,7 +10,7 @@
 source "$(dirname "$0")/_common.sh"
 
 SEEDS=${SEEDS:-"0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18"}
-OUT=${OUT:-"results/arm_bptt_40k${WH_SUFFIX}"}
+OUT=${OUT:-"results/arm_bptt_$((STEPS / 1000))k${WH_SUFFIX}"}
 
 banner start "lr=$LR steps=$STEPS seeds={$SEEDS} out=$OUT"
 for s in $SEEDS; do

@@ -6,8 +6,9 @@ learning; [Murray, _eLife_ 2019](https://elifesciences.org/articles/43299)), whi
 the transported gradient with a fixed random feedback matrix `B` and local eligibility
 traces. Both drive [MotorNet](https://github.com/OlivierCodol/MotorNet) effectors: a planar
 point mass with four Cartesian actuators, and a two-joint arm with six Hill-type muscles.
-RFLO learns the point mass as well as BPTT and plateaus on the arm at more than twice
-BPTT's error. We want to know what that failure looks like and what causes it.
+RFLO learns the point mass as well as BPTT. On the arm it learns more slowly: after 40k
+steps its error is more than twice BPTT's, and it is still improving at 100k. We want to
+know what that slow stretch looks like and what causes it.
 
 This project started as a [Neuromatch Academy](https://academy.neuromatch.io/) project.
 
@@ -23,20 +24,27 @@ This project started as a [Neuromatch Academy](https://academy.neuromatch.io/) p
 
 ![Summary figure](figures/canalization_summary.png)
 
-Arm, 17 seeds that converged in every condition, lr 0.025, 40k steps, 64 units. "Shared `B`"
+Arm, 17 seeds that passed the convergence gate in every condition, lr 0.025, 40k steps, 64 units. "Shared `B`"
 means every RFLO seed uses the same feedback matrix. "Per-seed `B`" gives each seed its own,
 which is how RFLO is usually run.
 
-**RFLO plateaus on the arm.** RFLO's reaches end 0.27 of the reach distance from the target on
-average, and BPTT's end 0.11 away. The gap holds at every learning rate we tried (0.01 to
-0.05). Wider networks (128 units for 100k steps, 256 for 120k) stay at the same plateau, and a
-loss weighted toward the end of the reach lowers the error without changing its pattern.
+**RFLO is slower on the arm.** At 40k steps RFLO's reaches end 0.27 of the reach distance from
+the target on average, and BPTT's end 0.11 away. The gap at that budget holds at every learning
+rate we tried (0.01 to 0.05). Wider networks (128 units for 100k steps, 256 for 120k) end at
+about the same error, and a loss weighted toward the end of the reach lowers the error without
+changing its pattern. We first read this as a plateau. From 20k to 40k steps RFLO's
+training loss sits on a shelf near 0.046, then starts falling again. On eight seeds
+trained to 100k steps, RFLO's error drops from 0.28 to 0.19 (lower on seven of the eight) and
+BPTT's from 0.11 to 0.07. Neither rule's loss has flattened at 100k, so we do not know where
+either one ends up.
 
 **The errors lie along one axis.** Panel C: RFLO's errors lie along the axis from the rightward
 target (direction 0) to the leftward one (direction 4). Each seed is worst at one of the two
 poles, and its error falls off with distance from that pole. With a shared `B`, all 17 seeds
-are worst at direction 0 or 4 (6 and 11 seeds). BPTT is flat at 0.11 in every direction. Which
-pole a seed fails at depends on both its initialization and its `B`: swapping `B` at a fixed
+are worst at direction 0 or 4 (6 and 11 seeds). BPTT is flat at 0.11 in every direction. These
+are 40k-step profiles, taken while RFLO is on the shelf. At 100k steps (eight seeds) the gap
+between a seed's best and worst direction has shrunk from 0.38 to 0.21 on average, against
+0.10 for BPTT. Which pole a seed fails at depends on both its initialization and its `B`: swapping `B` at a fixed
 initialization flips 7 of 17 networks. The axis is not the arm's inertia. At the start posture
 the hand is hardest to accelerate along the forearm, 36° away from it.
 
@@ -65,19 +73,31 @@ equivalence margin, and every run finishes within 10% of reach on every directio
 weight geometry shows no shared directions: RFLO seeds sit 86.5° apart against BPTT's 88.5°
 and a null of 88.7°, with a participation ratio of 14.4 out of 15 across-seed directions.
 
-**Training stability.** RFLO converged in 24 of 26 arm seeds with a shared `B`, 20 of 26 with
-per-seed `B`, and BPTT in 26 of 26.
+**Training stability.** RFLO passed our convergence gate in 24 of 26 arm seeds with a shared
+`B`, 20 of 26 with per-seed `B`, and BPTT in 26 of 26. The gate asks that the loss be below
+0.10 and drop by less than 2e-3 over the last 2000 steps. It separates runs that reached the
+shelf from runs stuck far above it. It does not show that learning has stopped.
 
 ### Open questions
 
-- **Why does RFLO fail the arm?** Either its fixed update directions are enough to cause the
-  failure, or its approximate credit is the problem. RFLO's error signal here is
-  backpropagated through the arm's dynamics, but it drops credit through the network's own
-  recurrence and through the sensory loop. On a first look at 5 seeds, RFLO's total change in
-  recurrent weights has an effective rank of about 1.8 against BPTT's 4.7, and 59% of it lies
-  along `B` (9% by chance). Next we'll train BPTT with its gradients projected onto the span of
-  `B`. If it fails along the same axis, the directions are enough. If it learns the arm, the
-  credit is what's missing.
+- **Why is RFLO slow on the arm?** Either its fixed update directions are enough to slow it,
+  or its approximate credit is the problem. RFLO's error signal here is backpropagated through
+  the arm's dynamics, but it drops credit through the network's own recurrence and through the
+  sensory loop. On a first look at 5 seeds, RFLO's total change in recurrent weights has an
+  effective rank of about 1.8 against BPTT's 4.7, and 59% of it lies along `B` (9% by chance).
+  To separate the two we train BPTT with its recurrent and input gradients projected onto the
+  span of `B`. First results, eight seeds at 100k steps: error 0.07 for BPTT, 0.13 for projected
+  BPTT and 0.19 for RFLO, in that order on training loss for every seed. Projected BPTT's
+  seeds share no weight directions: on all 17 seeds they sit 83° apart at 40k steps, like
+  BPTT's 84° and far from shared-`B` RFLO's 70° (paired p = 1.5e-5), although every weight
+  change lies in the span of the same `B`. The shared directions need RFLO's credit signal as
+  well as a shared `B`. Whether the subspace contributes to the error pattern is
+  unclear: on nine seeds at 40k, projected BPTT's errors partly line up with RFLO's on the same
+  network (r = 0.37), and on four others they do not. The projection also shrinks each step,
+  which we have not yet separated from the change in direction.
+- **Does RFLO catch up?** On four seeds trained to 300k steps its error is 0.12, still above
+  BPTT's 0.07 at 100k, and its loss has nearly stopped falling. The remaining error sits on the
+  leftward targets (directions 3-5) on all four.
 - **What sets the axis?** Inertia doesn't. The muscles' force capacity varies with direction
   and is the next candidate.
 - **How often does a network change poles?** Each network has been trained with only one
@@ -131,25 +151,36 @@ python run_experiment.py RigidTendonArm26 --seeds 0 1 2 --lr 0.025 \
 
 The scripts behind the results above are in `drivers/`. Each runs one seed per process,
 throttles to `MAX` concurrent jobs, skips artifacts already on disk (so an interrupted
-campaign resumes by relaunching), and takes its parameters from environment variables:
+run resumes when relaunched), and takes its parameters from environment variables:
 
-| driver                 | what it runs                                                                                                                         |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `evaryB.sh`            | RFLO on the arm twice, once with a shared feedback matrix and once with a per-seed one.                                              |
-| `arm_bptt.sh`          | BPTT on the arm at the matched rate and budget. Seed _s_ starts from the same initialization as RFLO seed _s_.                       |
-| `lr_sweep.sh`          | Learning-rate sweep for either effector, both rules. The point mass matches at 0.01 and the arm does not match at any rate.          |
-| `pointmass_matched.sh` | Point mass, 15 seeds at lr 0.01 with weight history: the matched-behavior negative control.                                          |
-| `arm_lift.sh`          | Attempts to lift RFLO's arm plateau: wider networks, a terminal-weighted loss, and a sweep of `B` at one fixed network.              |
-| `alignedB.sh`          | RFLO with the random feedback matrix replaced by the live readout weights, testing whether the corridor needs feedback to be random. |
-| `fixnet.sh`            | One fixed network, many feedback matrices. Separates `B`'s effect on the reach profile from the initialization's.                    |
-| `noisy.sh`             | Proprioceptive and visual feedback noise during training, scaled to each effector's reach distance.                                  |
+| driver                  | what it runs                                                                                                                             |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `evaryB.sh`             | RFLO on the arm twice, once with a shared feedback matrix and once with a per-seed one.                                                  |
+| `arm_bptt.sh`           | BPTT on the arm at the matched rate, 40k steps by default. Seed _s_ starts from the same initialization as RFLO seed _s_.                |
+| `arm_bptt_projected.sh` | BPTT with its recurrent and input gradients projected onto the span of the shared `B`, 100k steps by default.                            |
+| `arm_fixB_long.sh`      | Shared-`B` RFLO past 40k steps (100k by default), in a directory named after the budget.                                                 |
+| `lr_sweep.sh`           | Learning-rate sweep for either effector, both rules. The point mass matches at 0.01 and the arm does not match at any rate by 40k steps. |
+| `pointmass_matched.sh`  | Point mass, 15 seeds at lr 0.01 with weight history: the matched-behavior negative control.                                              |
+| `arm_lift.sh`           | Attempts to lower RFLO's arm error: wider networks, a terminal-weighted loss, and a sweep of `B` at one fixed network.                   |
+| `alignedB.sh`           | RFLO with the random feedback matrix replaced by the live readout weights, testing whether the corridor needs feedback to be random.     |
+| `fixnet.sh`             | One fixed network, many feedback matrices. Separates `B`'s effect on the reach profile from the initialization's. Not yet run.           |
+| `noisy.sh`              | Proprioceptive and visual feedback noise during training, scaled to each effector's reach distance.                                      |
 
 ```bash
-# 15 seeds, both feedback conditions, with weight history (~0.66 GB per seed)
+# five seeds, both feedback conditions, with weight history (~0.66 GB per seed at 40k steps)
 WEIGHT_HISTORY=1 SEEDS="0 1 2 3 4" nohup bash drivers/evaryB.sh &>logs/evaryB/driver.log &
 
-These are the parameters that worked for me on my Macbook Air M3. A better computer would probably be able to run more concurrent processes. I have tested this on Linux and also with GPUs but the RNGs are hardware-specific so comparisons are best done between runs generated by the same machine.
+# projected BPTT at 100k steps, then shared-B RFLO to 300k on four of the same seeds
+mkdir -p logs/arm_bptt_projected logs/arm_fixB_long
+nohup bash drivers/arm_bptt_projected.sh &>logs/arm_bptt_projected/driver.log &
+STEPS=300000 SEEDS="1 3 9 10" nohup bash drivers/arm_fixB_long.sh &>logs/arm_fixB_long/driver.log &
 ```
+
+These are the settings that worked for me on a MacBook Air M3: four runs at a time, one
+thread each. On that machine an arm run of 40k steps takes about 2 hours for BPTT and 3 for
+RFLO, and 100k steps about 5.5 and 8. A faster computer can run more at once. I have also run
+this on Linux and with GPUs, but the random number streams are hardware-specific, so compare
+runs made on the same machine.
 
 ---
 
@@ -212,12 +243,13 @@ shuffling labels across seeds, and a family of tests is Holm-corrected.
 │   ├── weights.py            #   weight-displacement and subspace geometry
 │   └── stats.py              #   grouped dispersion, permutation tests, Holm
 ├── plot.py                   # trajectory and workspace plotting
-├── drivers/                  # training campaigns (see the table above)
+├── drivers/                  # training drivers (see the table above)
 ├── run_experiment.py         # train one or more seeds, write artifacts
 ├── check_convergence.py      # the convergence gate
 ├── per_direction_error.py    # per-direction reach error
 ├── summarize_behavior.py     # reach-relative error and scaled success
-├── run_activation_dsa.py# activation-space DSA at N=15
+├── run_activation_dsa.py     # activation-space DSA, grouped by rule
+├── run_condition_dsa.py      # activation-space DSA, grouped by feedback condition
 ├── run_subspace_geometry.py  # learning-subspace (Grassmann) geometry
 ├── delta_w_geometry.py       # weight-displacement cosine and participation ratio
 ├── run_paired_permutation.py # paired permutation tests with Holm correction
